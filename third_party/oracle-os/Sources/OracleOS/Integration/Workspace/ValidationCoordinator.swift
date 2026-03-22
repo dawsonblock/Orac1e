@@ -52,6 +52,17 @@ public actor CodingValidationCoordinator {
         let plan = executionPlan(for: repoURL)
         var steps: [CodingValidationStep] = []
 
+        if plan.stages.isEmpty && plan.resolvedCommands.isEmpty {
+            return CodingValidationResult(
+                ok: false,
+                steps: [],
+                profileName: plan.profileName,
+                stageCount: 0,
+                resolvedCommands: [],
+                errorCategory: "validation_unconfigured"
+            )
+        }
+
         for stage in plan.stages {
             for command in stage.commands {
                 let step = await runShell(

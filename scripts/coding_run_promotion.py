@@ -227,6 +227,14 @@ def _environments_match(env1: dict[str, str], env2: dict[str, str]) -> bool:
 
 
 def _run_validation(repo: Path, commands: list[str]) -> dict[str, Any]:
+    if not commands:
+        return {
+            "ok": False,
+            "steps": [],
+            "environment": _capture_environment(repo),
+            "error_category": "validation_unconfigured",
+            "summary": "Validation configuration missing - no validation commands configured"
+        }
     steps: list[dict[str, Any]] = []
     for command in commands:
         proc = subprocess.run(
@@ -294,15 +302,12 @@ def promote_run(
     worktree_repo = Path(metadata.get("worktreePath") or ROOT / "workspace" / "worktrees" / run_id).resolve()
     validation_commands = list(metadata.get("validationCommands") or [])
 
-    if not canonical_repo.exists():
-        raise PromotionError(f"canonical repo missing: {canonical_repo}")
-    if not worktree_repo.exists():
-        raise PromotionError(f"worktree missing: {worktree_repo}")
-    
-    # Normalized status vocabulary check
+    # Normalized status vocabulary check - load immediately after run
     current_status = run.get("status")
+
+    # Check if already applied BEFORE worktree existence check (idempotent path)
     if current_status == "applied":
-        # Already applied - return existing promotion receipt (idempotent)
+        # Already applied - return existing promotion receipt (no worktree needed for idempotent path)
         paths = _paths_for(run_id)
         if paths.promotion_receipt_path.exists():
             existing_receipt = _read_json(paths.promotion_receipt_path, {})
@@ -315,7 +320,14 @@ def promote_run(
                 receipt_path=str(paths.promotion_receipt_path),
             )
         raise PromotionError(f"run {run_id} is already applied but receipt is missing")
-    
+
+    # Only verify worktree exists for non-applied runs
+    if not canonical_repo.exists():
+        raise PromotionError(f"canonical repo missing: {canonical_repo}")
+    if not worktree_repo.exists():
+        raise PromotionError(f"worktree missing: {worktree_repo}")
+
+    # Verify run is in correct state for promotion
     if current_status != "awaiting_approval":
         raise PromotionError(f"run {run_id} is not awaiting approval (current status: {current_status})")
     

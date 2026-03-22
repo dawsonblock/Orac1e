@@ -187,8 +187,8 @@ class TestPromotionStatusTransitions:
         assert runs[0]["status"] == "rejected", \
             "Status should transition to 'rejected'"
 
-    def test_status_running_to_applied(self, promotion_env):
-        """Test transition from running to applied."""
+    def test_status_running_to_applied_is_rejected(self, promotion_env):
+        """Test that promotion from running status is rejected (requires awaiting_approval)."""
         # Update status to running
         runs = json.loads(
             (promotion_env["runs_root"] / "runs.json").read_text(encoding="utf-8")
@@ -201,13 +201,11 @@ class TestPromotionStatusTransitions:
         worktree = promotion_env["worktree"]
         (worktree / "app.py").write_text("print('updated')\n", encoding="utf-8")
 
-        result = crp.promote_run(promotion_env["run_id"], actor="tester", note="ship")
+        with pytest.raises(crp.PromotionError, match="not awaiting approval"):
+            crp.promote_run(promotion_env["run_id"], actor="tester", note="should fail")
 
-        assert result.status == "applied", \
-            "Should be able to promote from 'running' status"
-
-    def test_status_running_to_rejected(self, promotion_env):
-        """Test transition from running to rejected."""
+    def test_status_running_to_rejected_is_rejected(self, promotion_env):
+        """Test that rejection from running status is rejected (requires awaiting_approval)."""
         # Update status to running
         runs = json.loads(
             (promotion_env["runs_root"] / "runs.json").read_text(encoding="utf-8")
@@ -217,10 +215,8 @@ class TestPromotionStatusTransitions:
             json.dumps(runs, indent=2), encoding="utf-8"
         )
 
-        result = crp.reject_run(promotion_env["run_id"], actor="tester", note="reject")
-
-        assert result["decision"] == "rejected", \
-            "Should be able to reject from 'running' status"
+        with pytest.raises(crp.PromotionError, match="not awaiting approval"):
+            crp.reject_run(promotion_env["run_id"], actor="tester", note="should fail")
 
 
 class TestPromotionReceipts:

@@ -54,7 +54,7 @@ class TestInteractiveRunPromotion:
             encoding="utf-8"
         )
         
-        assert "updated" in canonical_content, \
+        assert "interactive update" in canonical_content, \
             "Canonical repo should contain the promoted content"
 
     def test_promotion_updates_runs_json_status(self, promotion_env):
@@ -253,8 +253,7 @@ class TestPromotionMetadata:
             promotion_env["run_id"], actor="tester", note="ship it"
         )
 
-        receipt_path = result.receipt_path
-        receipt = json.loads(open(receipt_path).read())
+        receipt = json.loads(open(result.receipt_path).read())
 
         required_fields = [
             "run_id",

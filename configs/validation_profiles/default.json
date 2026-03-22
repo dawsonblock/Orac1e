@@ -1,6 +1,12 @@
 {
   "profile": "default",
   "language": "default",
-  "commands": [],
-  "stages": []
+  "description": "Fallback validation profile",
+  "stages": [
+    {
+      "id": "repo_sanity",
+      "name": "Repository sanity",
+      "commands": ["git status --short"]
+    }
+  ]
 }

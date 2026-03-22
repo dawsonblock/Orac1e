@@ -39,19 +39,22 @@ public struct CodingValidationResult: Codable, Sendable {
     public let profileName: String?
     public let stageCount: Int
     public let resolvedCommands: [String]
+    public let errorCategory: String?
 
     public init(
         ok: Bool,
         steps: [CodingValidationStep],
         profileName: String? = nil,
         stageCount: Int = 0,
-        resolvedCommands: [String] = []
+        resolvedCommands: [String] = [],
+        errorCategory: String? = nil
     ) {
         self.ok = ok
         self.steps = steps
         self.profileName = profileName
         self.stageCount = stageCount
         self.resolvedCommands = resolvedCommands
+        self.errorCategory = errorCategory
     }
 }
 
