@@ -1,0 +1,4 @@
+Workspace wrapper files in this repository may be used under the MIT License.
+
+Third-party repositories under `third_party/` retain their own upstream licenses.
+Review each upstream project before redistribution or deployment.

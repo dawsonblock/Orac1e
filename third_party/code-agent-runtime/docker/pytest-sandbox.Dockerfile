@@ -1,0 +1,5 @@
+FROM python:3.11-slim
+WORKDIR /workspace
+ENV PYTHONDONTWRITEBYTECODE=1
+RUN python -m pip install --upgrade pip pytest
+CMD ["bash"]

@@ -1,0 +1,10 @@
+language: python
+image: python:3.11-slim
+markers:
+  - pyproject.toml
+  - requirements.txt
+  - setup.py
+  - pytest.ini
+globs:
+  - "**/*.py"
+marker_weight: 10

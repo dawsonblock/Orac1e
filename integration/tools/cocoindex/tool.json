@@ -1,0 +1,28 @@
+{
+  "id": "cocoindex",
+  "name": "Cocoindex Retrieval",
+  "version": "1.0.0",
+  "api_version": "1.0",
+  "kind": "retrieval",
+  "capabilities": [
+    "retrieval.code.search"
+  ],
+  "base_url": "http://127.0.0.1:8787",
+  "health_path": "/health",
+  "invoke_path": "/invoke",
+  "risk_level": "low",
+  "repo_languages": ["python", "javascript", "typescript", "swift"],
+  "timeouts": {
+    "health_ms": 2000,
+    "invoke_ms": 30000
+  },
+  "concurrency": {
+    "max_global": 8,
+    "max_per_repo": 4
+  },
+  "features": {
+    "supports_diff": false,
+    "supports_streaming": false,
+    "supports_cancellation": false
+  }
+}

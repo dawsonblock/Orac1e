@@ -1,0 +1,12 @@
+language: js_ts
+image: node:20-bookworm-slim
+markers:
+  - package.json
+  - pnpm-lock.yaml
+  - yarn.lock
+globs:
+  - "**/*.js"
+  - "**/*.jsx"
+  - "**/*.ts"
+  - "**/*.tsx"
+marker_weight: 10

@@ -1,0 +1,1026 @@
+diff -ruN oracle40_phase3/Sources/OracleOS/Execution/ExecutionEvidence.swift oracle40_phase4/Sources/OracleOS/Execution/ExecutionEvidence.swift
+--- oracle40_phase3/Sources/OracleOS/Execution/ExecutionEvidence.swift	1970-01-01 00:00:00.000000000 +0000
++++ oracle40_phase4/Sources/OracleOS/Execution/ExecutionEvidence.swift	2026-03-20 03:12:24.404745647 +0000
+@@ -0,0 +1,43 @@
++import Foundation
++
++public enum ExpectedPostcondition: Sendable, Codable, Equatable {
++    case activeApplication(String)
++    case windowTitleContains(String)
++    case urlContains(String)
++    case fileExists(String)
++    case fileContentsChanged(String)
++    case buildSucceeded
++    case testsCompleted
++}
++
++public struct ExecutionEvidence: Sendable, Codable, Equatable {
++    public let observations: [ObservationPayload]
++    public let artifacts: [ArtifactPayload]
++    public let events: [EventEnvelope]
++    public let expectedPostconditions: [ExpectedPostcondition]
++    public let notes: [String]
++
++    public init(
++        observations: [ObservationPayload] = [],
++        artifacts: [ArtifactPayload] = [],
++        events: [EventEnvelope] = [],
++        expectedPostconditions: [ExpectedPostcondition] = [],
++        notes: [String] = []
++    ) {
++        self.observations = observations
++        self.artifacts = artifacts
++        self.events = events
++        self.expectedPostconditions = expectedPostconditions
++        self.notes = notes
++    }
++
++    public func withEvents(_ events: [EventEnvelope]) -> ExecutionEvidence {
++        ExecutionEvidence(
++            observations: observations,
++            artifacts: artifacts,
++            events: events,
++            expectedPostconditions: expectedPostconditions,
++            notes: notes
++        )
++    }
++}
+diff -ruN oracle40_phase3/Sources/OracleOS/Execution/ExecutionOutcome.swift oracle40_phase4/Sources/OracleOS/Execution/ExecutionOutcome.swift
+--- oracle40_phase3/Sources/OracleOS/Execution/ExecutionOutcome.swift	2026-03-20 02:56:08.375530342 +0000
++++ oracle40_phase4/Sources/OracleOS/Execution/ExecutionOutcome.swift	2026-03-20 03:12:24.405875059 +0000
+@@ -9,20 +9,28 @@
+     public let verifierReport: VerifierReport
+     public let observations: [ObservationPayload]
+     public let artifacts: [ArtifactPayload]
++    public let evidence: ExecutionEvidence
+ 
+-    public init(commandID: CommandID, status: ExecutionStatus, observations: [ObservationPayload] = [],
+-                artifacts: [ArtifactPayload] = [], events: [EventEnvelope], verifierReport: VerifierReport) {
++    public init(
++        commandID: CommandID,
++        status: ExecutionStatus,
++        observations: [ObservationPayload] = [],
++        artifacts: [ArtifactPayload] = [],
++        events: [EventEnvelope],
++        verifierReport: VerifierReport,
++        evidence: ExecutionEvidence? = nil
++    ) {
+         self.commandID = commandID
+         self.status = status
+         self.observations = observations
+         self.artifacts = artifacts
+         self.verifierReport = verifierReport
+ 
+-        // Runtime invariant: both success and failure paths must produce events.
++        let resolvedEvents: [EventEnvelope]
+         if events.isEmpty {
+             let fallbackEventType: String = (status == .success) ? EventKinds.commandSucceeded : EventKinds.commandFailed
+             let payload = (try? OracleJSONCoding.makeEncoder().encode(CommandLifecyclePayload(status: status.rawValue))) ?? Data()
+-            self.events = [
++            resolvedEvents = [
+                 EventEnvelope(
+                     sequenceNumber: 0,
+                     commandID: commandID,
+@@ -33,8 +41,14 @@
+                 ),
+             ]
+         } else {
+-            self.events = events
++            resolvedEvents = events
+         }
++        self.events = resolvedEvents
++        self.evidence = evidence ?? ExecutionEvidence(
++            observations: observations,
++            artifacts: artifacts,
++            events: resolvedEvents
++        )
+     }
+ 
+     public static func failure(from error: any Error, command: Command) -> ExecutionOutcome {
+@@ -70,7 +84,8 @@
+                 policyDecision: "error",
+                 postconditionsPassed: false,
+                 notes: [reason]
+-            )
++            ),
++            evidence: ExecutionEvidence(notes: [reason]).withEvents(events)
+         )
+     }
+ }
+diff -ruN oracle40_phase3/Sources/OracleOS/Execution/OutcomeVerifier.swift oracle40_phase4/Sources/OracleOS/Execution/OutcomeVerifier.swift
+--- oracle40_phase3/Sources/OracleOS/Execution/OutcomeVerifier.swift	1970-01-01 00:00:00.000000000 +0000
++++ oracle40_phase4/Sources/OracleOS/Execution/OutcomeVerifier.swift	2026-03-20 03:12:24.405382712 +0000
+@@ -0,0 +1,162 @@
++import Foundation
++
++public struct OutcomeVerifier: Sendable {
++    public init() {}
++
++    public func verify(
++        command: Command,
++        snapshotBeforeExecution: WorldModelSnapshot,
++        routedResult: RoutedExecutionResult,
++        observedAfterExecution: PostExecutionObservation,
++        policyDecision: PolicyDecision,
++        preconditionsPassed: Bool
++    ) -> VerifierReport {
++        var notes = routedResult.evidence.notes + observedAfterExecution.notes
++        var postconditionsPassed = true
++
++        for expectation in routedResult.evidence.expectedPostconditions {
++            if !matches(
++                expectation,
++                command: command,
++                snapshotBeforeExecution: snapshotBeforeExecution,
++                routedResult: routedResult,
++                observedAfterExecution: observedAfterExecution,
++                notes: &notes
++            ) {
++                postconditionsPassed = false
++            }
++        }
++
++        if routedResult.status != .success && routedResult.status != .partialSuccess {
++            postconditionsPassed = false
++            if notes.isEmpty {
++                notes.append("router returned \(routedResult.status.rawValue)")
++            }
++        }
++
++        if routedResult.evidence.expectedPostconditions.isEmpty,
++           routedResult.status == .success,
++           !notes.contains("no_expected_postconditions")
++        {
++            notes.append("no_expected_postconditions")
++        }
++
++        return VerifierReport(
++            commandID: command.id,
++            preconditionsPassed: preconditionsPassed,
++            policyDecision: policyDecision.allowed ? "approved" : "blocked",
++            postconditionsPassed: postconditionsPassed,
++            notes: notes
++        )
++    }
++
++    private func matches(
++        _ expectation: ExpectedPostcondition,
++        command: Command,
++        snapshotBeforeExecution: WorldModelSnapshot,
++        routedResult: RoutedExecutionResult,
++        observedAfterExecution: PostExecutionObservation,
++        notes: inout [String]
++    ) -> Bool {
++        switch expectation {
++        case .activeApplication(let value):
++            if observedAfterExecution.activeApplication?.localizedCaseInsensitiveContains(value) == true {
++                return true
++            }
++            notes.append("active app missing: \(value)")
++            return false
++
++        case .windowTitleContains(let value):
++            if observedAfterExecution.windowTitle?.localizedCaseInsensitiveContains(value) == true {
++                return true
++            }
++            notes.append("window title missing: \(value)")
++            return false
++
++        case .urlContains(let value):
++            if observedAfterExecution.url?.localizedCaseInsensitiveContains(value) == true {
++                return true
++            }
++            notes.append("url missing: \(value)")
++            return false
++
++        case .fileExists(let path):
++            if observedAfterExecution.fileExistsByPath[path] == true {
++                return true
++            }
++            notes.append("file missing: \(path)")
++            return false
++
++        case .fileContentsChanged(let path):
++            guard observedAfterExecution.fileExistsByPath[path] == true else {
++                notes.append("file missing for content check: \(path)")
++                return false
++            }
++
++            if let expected = expectedFileContents(for: path, command: command, routedResult: routedResult),
++               let actual = observedAfterExecution.fileContentsByPath[path]
++            {
++                if actual == expected {
++                    return true
++                }
++                notes.append("file contents mismatch: \(path)")
++                return false
++            }
++
++            if let actual = observedAfterExecution.fileContentsByPath[path], !actual.isEmpty {
++                return true
++            }
++
++            notes.append("file content unavailable: \(path)")
++            return false
++
++        case .buildSucceeded:
++            if observedAfterExecution.buildSucceeded == true {
++                return true
++            }
++            notes.append("build did not succeed")
++            return false
++
++        case .testsCompleted:
++            if observedAfterExecution.testsSucceeded == true || observedAfterExecution.failingTestCount != nil {
++                return true
++            }
++            notes.append("tests did not produce verifiable result")
++            return false
++        }
++    }
++
++    private func expectedFileContents(
++        for path: String,
++        command: Command,
++        routedResult: RoutedExecutionResult
++    ) -> String? {
++        if case .code(let action) = command.payload,
++           let patch = action.patch,
++           let resolvedPath = resolvePath(filePath: action.filePath, workspacePath: action.workspacePath)?.path,
++           resolvedPath == path
++        {
++            return patch
++        }
++
++        if let artifact = routedResult.evidence.artifacts.first(where: { $0.identifier == path }),
++           let data = artifact.data,
++           let string = String(data: data, encoding: .utf8)
++        {
++            return string
++        }
++
++        return nil
++    }
++
++    private func resolvePath(filePath: String?, workspacePath: String?) -> URL? {
++        guard let filePath, !filePath.isEmpty else { return nil }
++        guard let workspacePath, !filePath.hasPrefix("/") else {
++            return URL(fileURLWithPath: filePath)
++        }
++
++        return URL(fileURLWithPath: workspacePath, isDirectory: true)
++            .appendingPathComponent(filePath)
++            .standardizedFileURL
++    }
++}
+diff -ruN oracle40_phase3/Sources/OracleOS/Execution/PostExecutionObserver.swift oracle40_phase4/Sources/OracleOS/Execution/PostExecutionObserver.swift
+--- oracle40_phase3/Sources/OracleOS/Execution/PostExecutionObserver.swift	1970-01-01 00:00:00.000000000 +0000
++++ oracle40_phase4/Sources/OracleOS/Execution/PostExecutionObserver.swift	2026-03-20 03:12:24.405277701 +0000
+@@ -0,0 +1,146 @@
++import Foundation
++
++public struct PostExecutionObservation: Sendable {
++    public let activeApplication: String?
++    public let windowTitle: String?
++    public let url: String?
++    public let fileExistsByPath: [String: Bool]
++    public let fileContentsByPath: [String: String]
++    public let buildSucceeded: Bool?
++    public let testsSucceeded: Bool?
++    public let failingTestCount: Int?
++    public let notes: [String]
++
++    public init(
++        activeApplication: String? = nil,
++        windowTitle: String? = nil,
++        url: String? = nil,
++        fileExistsByPath: [String: Bool] = [:],
++        fileContentsByPath: [String: String] = [:],
++        buildSucceeded: Bool? = nil,
++        testsSucceeded: Bool? = nil,
++        failingTestCount: Int? = nil,
++        notes: [String] = []
++    ) {
++        self.activeApplication = activeApplication
++        self.windowTitle = windowTitle
++        self.url = url
++        self.fileExistsByPath = fileExistsByPath
++        self.fileContentsByPath = fileContentsByPath
++        self.buildSucceeded = buildSucceeded
++        self.testsSucceeded = testsSucceeded
++        self.failingTestCount = failingTestCount
++        self.notes = notes
++    }
++}
++
++public struct PostExecutionObserver: @unchecked Sendable {
++    private let automationHost: AutomationHost?
++
++    public init(automationHost: AutomationHost? = nil) {
++        self.automationHost = automationHost
++    }
++
++    public func observe(
++        command: Command,
++        evidence: ExecutionEvidence,
++        snapshotBeforeExecution: WorldModelSnapshot
++    ) async -> PostExecutionObservation {
++        var activeApplication: String?
++        var windowTitle: String?
++        var url: String?
++        var fileExistsByPath: [String: Bool] = [:]
++        var fileContentsByPath: [String: String] = [:]
++        var buildSucceeded: Bool?
++        var testsSucceeded: Bool?
++        var failingTestCount: Int?
++        var notes: [String] = []
++
++        switch command.payload {
++        case .ui(let action):
++            let observed = await MainActor.run { ObservationBuilder.capture(appName: action.app) }
++            activeApplication = observed.app
++            windowTitle = observed.windowTitle
++            url = observed.url
++            notes.append("ui_readback")
++
++        case .code(let action):
++            for path in candidatePaths(for: command, evidence: evidence) {
++                let exists = FileManager.default.fileExists(atPath: path)
++                fileExistsByPath[path] = exists
++                if exists,
++                   let data = FileManager.default.contents(atPath: path),
++                   let text = String(data: data, encoding: .utf8)
++                {
++                    fileContentsByPath[path] = text
++                }
++            }
++            notes.append("code_readback")
++
++        case .shell:
++            break
++        }
++
++        for event in evidence.events {
++            switch event.eventType {
++            case EventKinds.buildCompleted:
++                let payload = EventPayloadDecoder.decode(BuildCompletedPayload.self, from: event)
++                buildSucceeded = payload?.succeeded
++            case EventKinds.testsCompleted:
++                let payload = EventPayloadDecoder.decode(TestsCompletedPayload.self, from: event)
++                testsSucceeded = payload?.succeeded
++                failingTestCount = payload?.failingTestCount
++            default:
++                break
++            }
++        }
++
++        if activeApplication == nil { activeApplication = snapshotBeforeExecution.activeApplication }
++        if windowTitle == nil { windowTitle = snapshotBeforeExecution.windowTitle }
++        if url == nil { url = snapshotBeforeExecution.url }
++
++        return PostExecutionObservation(
++            activeApplication: activeApplication,
++            windowTitle: windowTitle,
++            url: url,
++            fileExistsByPath: fileExistsByPath,
++            fileContentsByPath: fileContentsByPath,
++            buildSucceeded: buildSucceeded,
++            testsSucceeded: testsSucceeded,
++            failingTestCount: failingTestCount,
++            notes: notes
++        )
++    }
++
++    private func candidatePaths(for command: Command, evidence: ExecutionEvidence) -> [String] {
++        var paths: [String] = []
++
++        for postcondition in evidence.expectedPostconditions {
++            switch postcondition {
++            case .fileExists(let path), .fileContentsChanged(let path):
++                paths.append(path)
++            default:
++                break
++            }
++        }
++
++        if case .code(let action) = command.payload,
++           let path = resolvePath(filePath: action.filePath, workspacePath: action.workspacePath)?.path
++        {
++            paths.append(path)
++        }
++
++        return Array(Set(paths)).sorted()
++    }
++
++    private func resolvePath(filePath: String?, workspacePath: String?) -> URL? {
++        guard let filePath, !filePath.isEmpty else { return nil }
++        guard let workspacePath, !filePath.hasPrefix("/") else {
++            return URL(fileURLWithPath: filePath)
++        }
++
++        return URL(fileURLWithPath: workspacePath, isDirectory: true)
++            .appendingPathComponent(filePath)
++            .standardizedFileURL
++    }
++}
+diff -ruN oracle40_phase3/Sources/OracleOS/Execution/PostconditionsValidator.swift oracle40_phase4/Sources/OracleOS/Execution/PostconditionsValidator.swift
+--- oracle40_phase3/Sources/OracleOS/Execution/PostconditionsValidator.swift	2026-03-20 02:56:08.383414370 +0000
++++ oracle40_phase4/Sources/OracleOS/Execution/PostconditionsValidator.swift	2026-03-20 03:12:24.410905804 +0000
+@@ -1,59 +1,48 @@
+ import Foundation
+ 
+-/// Validates postconditions after command execution.
+-/// Returns true if expected outcomes were achieved, false otherwise.
++/// Validates final outcome consistency after command execution.
++/// This validator does not determine whether an action succeeded in the world;
++/// OutcomeVerifier owns that decision. This layer only checks that the final
++/// report and status agree with each other.
+ public struct PostconditionsValidator: Sendable {
+     public init() {}
+-    
++
+     public func validate(_ command: Command, outcome: ExecutionOutcome) throws -> Bool {
+-        // Check base execution status
+-        guard outcome.status != .failed else {
+-            throw PostconditionError.executionFailed
++        guard outcome.verifierReport.commandID == command.id else {
++            throw PostconditionError.commandIDMismatch
+         }
+-        
+-        // For partial success, check if critical verifications passed
+-        if outcome.status == .partialSuccess {
++
++        switch outcome.status {
++        case .failed:
++            throw PostconditionError.executionFailed
++
++        case .preconditionFailed:
++            guard outcome.verifierReport.preconditionsPassed == false else {
++                throw PostconditionError.preconditionsNotVerified
++            }
++
++        case .policyBlocked:
++            guard outcome.verifierReport.policyDecision == "blocked" else {
++                throw PostconditionError.invalidPolicyDecision(outcome.verifierReport.policyDecision)
++            }
++
++        case .postconditionFailed:
++            guard outcome.verifierReport.postconditionsPassed == false else {
++                throw PostconditionError.postconditionsNotMet
++            }
++
++        case .success, .partialSuccess:
+             guard outcome.verifierReport.preconditionsPassed else {
+-                throw PostconditionError.preconditionsNotMet
++                throw PostconditionError.preconditionsNotVerified
+             }
+             guard outcome.verifierReport.policyDecision == "approved" else {
+-                throw PostconditionError.policyNotApproved
++                throw PostconditionError.invalidPolicyDecision(outcome.verifierReport.policyDecision)
++            }
++            guard outcome.verifierReport.postconditionsPassed else {
++                throw PostconditionError.postconditionsNotMet
+             }
+         }
+-        
+-        // Validate verifier report is present and valid
+-        let report = outcome.verifierReport
+-        guard report.commandID == command.id else {
+-            throw PostconditionError.commandIDMismatch
+-        }
+-        
+-        // Verify preconditions were actually checked
+-        guard report.preconditionsPassed else {
+-            throw PostconditionError.preconditionsNotVerified
+-        }
+-        
+-        // Verify policy decision was made
+-        guard report.policyDecision == "approved" || report.policyDecision == "blocked" else {
+-            throw PostconditionError.invalidPolicyDecision(report.policyDecision)
+-        }
+-        
+-        // If policy was blocked, that's a failure
+-        if report.policyDecision == "blocked" {
+-            throw PostconditionError.policyBlocked(report.notes.joined(separator: ", "))
+-        }
+-        
+-        // Validate postconditions passed
+-        guard report.postconditionsPassed else {
+-            throw PostconditionError.postconditionsNotMet
+-        }
+-        
+-        // Validate observations were captured
+-        if outcome.observations.isEmpty && command.kind != "readElement" {
+-            // readElement may return empty observations, but others should have captured state
+-            // This is a warning rather than failure
+-            print("Warning: No observations captured for \(command.kind)")
+-        }
+-        
++
+         return true
+     }
+ }
+@@ -69,7 +58,7 @@
+     case policyBlocked(String)
+     case postconditionsNotMet
+     case observationCaptureFailed
+-    
++
+     public var description: String {
+         switch self {
+         case .executionFailed: return "Command execution failed"
+diff -ruN oracle40_phase3/Sources/OracleOS/Execution/Routing/CodeRouter.swift oracle40_phase4/Sources/OracleOS/Execution/Routing/CodeRouter.swift
+--- oracle40_phase3/Sources/OracleOS/Execution/Routing/CodeRouter.swift	2026-03-20 02:56:08.384256624 +0000
++++ oracle40_phase4/Sources/OracleOS/Execution/Routing/CodeRouter.swift	2026-03-20 03:12:24.408101718 +0000
+@@ -22,7 +22,7 @@
+     public func execute(
+         _ command: Command,
+         policyDecision: PolicyDecision
+-    ) async throws -> ExecutionOutcome {
++    ) async throws -> RoutedExecutionResult {
+         guard command.type == .code else {
+             throw RouterError.invalidRoute(expected: .code, actual: command.type)
+         }
+@@ -55,7 +55,8 @@
+                     artifacts: [],
+                     policyDecision: policyDecision,
+                     router: "code",
+-                    emittedEvents: successEvents(for: command, spec: spec, result: result)
++                    emittedEvents: successEvents(for: command, spec: spec, result: result),
++                    expectedPostconditions: expectedPostconditions(for: spec, result: result)
+                 )
+             }
+ 
+@@ -115,7 +116,8 @@
+                 router: "code",
+                 emittedEvents: [
+                     repositoryObservedEvent(command: command, snapshot: snapshot),
+-                ]
++                ],
++                expectedPostconditions: []
+             )
+ 
+         case "readFile":
+@@ -148,7 +150,8 @@
+                 artifacts: [ArtifactPayload(kind: "file", identifier: resolvedPath.path, data: data)],
+                 policyDecision: policyDecision,
+                 router: "code",
+-                emittedEvents: emittedEvents
++                emittedEvents: emittedEvents,
++                expectedPostconditions: [.fileExists(resolvedPath.path)]
+             )
+ 
+         case "modifyFile":
+@@ -184,10 +187,11 @@
+                         content: "modified \(resolvedPath.path): \(existing.count)->\(newContent.count) chars"
+                     ),
+                 ],
+-                artifacts: [ArtifactPayload(kind: "patch", identifier: resolvedPath.path)],
++                artifacts: [ArtifactPayload(kind: "patch", identifier: resolvedPath.path, data: newContent.data(using: .utf8))],
+                 policyDecision: policyDecision,
+                 router: "code",
+-                emittedEvents: emittedEvents
++                emittedEvents: emittedEvents,
++                expectedPostconditions: [.fileExists(resolvedPath.path), .fileContentsChanged(resolvedPath.path)]
+             )
+ 
+         default:
+@@ -234,6 +238,17 @@
+         return events
+     }
+ 
++    private func expectedPostconditions(for spec: CommandSpec, result: CommandResult) -> [ExpectedPostcondition] {
++        switch spec.category {
++        case .build:
++            return [.buildSucceeded]
++        case .test:
++            return [.testsCompleted]
++        default:
++            return []
++        }
++    }
++
+     private func parseFailingTestCount(from text: String) -> Int? {
+         let patterns = [
+             #"(\d+)\s+failures?"#,
+diff -ruN oracle40_phase3/Sources/OracleOS/Execution/Routing/CommandRouter.swift oracle40_phase4/Sources/OracleOS/Execution/Routing/CommandRouter.swift
+--- oracle40_phase3/Sources/OracleOS/Execution/Routing/CommandRouter.swift	2026-03-20 02:56:08.384613271 +0000
++++ oracle40_phase4/Sources/OracleOS/Execution/Routing/CommandRouter.swift	2026-03-20 03:12:24.406690002 +0000
+@@ -21,7 +21,7 @@
+     public func execute(
+         _ command: Command,
+         policyDecision: PolicyDecision
+-    ) async throws -> ExecutionOutcome {
++    ) async throws -> RoutedExecutionResult {
+         switch command.type {
+         case .system:
+             return try await systemRouter.execute(command, policyDecision: policyDecision)
+@@ -42,34 +42,18 @@
+         artifacts: [ArtifactPayload],
+         policyDecision: PolicyDecision,
+         router: String,
+-        emittedEvents: [EventEnvelope] = []
+-    ) -> ExecutionOutcome {
+-        let lifecycleEvents = [
+-            makeEvent(
+-                command: command,
+-                eventType: EventKinds.commandStarted,
+-                payload: CommandLifecyclePayload(router: router, status: "started")
+-            ),
+-            makeEvent(
+-                command: command,
+-                eventType: EventKinds.commandSucceeded,
+-                payload: CommandLifecyclePayload(router: router, status: "success")
+-            ),
+-        ]
+-
+-        return ExecutionOutcome(
+-            commandID: command.id,
+-            status: .success,
++        emittedEvents: [EventEnvelope] = [],
++        expectedPostconditions: [ExpectedPostcondition] = []
++    ) -> RoutedExecutionResult {
++        let notes = ["router=\(router)"]
++        let evidence = ExecutionEvidence(
+             observations: observations,
+             artifacts: artifacts,
+-            events: lifecycleEvents + emittedEvents,
+-            verifierReport: VerifierReport(
+-                commandID: command.id,
+-                preconditionsPassed: true,
+-                policyDecision: policyDecision.allowed ? "approved" : "blocked",
+-                postconditionsPassed: true
+-            )
++            events: emittedEvents,
++            expectedPostconditions: expectedPostconditions,
++            notes: notes
+         )
++        return RoutedExecutionResult(status: .success, evidence: evidence)
+     }
+ 
+     static func failureOutcome(
+@@ -79,34 +63,15 @@
+         router: String,
+         status: ExecutionStatus = .failed,
+         emittedEvents: [EventEnvelope] = []
+-    ) -> ExecutionOutcome {
+-        let lifecycleEvents = [
+-            makeEvent(
+-                command: command,
+-                eventType: EventKinds.commandStarted,
+-                payload: CommandLifecyclePayload(router: router, status: "started")
+-            ),
+-            makeEvent(
+-                command: command,
+-                eventType: EventKinds.commandFailed,
+-                payload: CommandLifecyclePayload(router: router, status: status.rawValue, reason: reason)
+-            ),
+-        ]
+-
+-        return ExecutionOutcome(
+-            commandID: command.id,
+-            status: status,
++    ) -> RoutedExecutionResult {
++        let evidence = ExecutionEvidence(
+             observations: [],
+             artifacts: [],
+-            events: lifecycleEvents + emittedEvents,
+-            verifierReport: VerifierReport(
+-                commandID: command.id,
+-                preconditionsPassed: true,
+-                policyDecision: policyDecision.allowed ? "approved" : "blocked",
+-                postconditionsPassed: false,
+-                notes: [reason]
+-            )
++            events: emittedEvents,
++            expectedPostconditions: [],
++            notes: ["router=\(router)", reason]
+         )
++        return RoutedExecutionResult(status: status, evidence: evidence)
+     }
+ 
+     static func makeEvent<P: Encodable>(
+diff -ruN oracle40_phase3/Sources/OracleOS/Execution/Routing/RoutedExecutionResult.swift oracle40_phase4/Sources/OracleOS/Execution/Routing/RoutedExecutionResult.swift
+--- oracle40_phase3/Sources/OracleOS/Execution/Routing/RoutedExecutionResult.swift	1970-01-01 00:00:00.000000000 +0000
++++ oracle40_phase4/Sources/OracleOS/Execution/Routing/RoutedExecutionResult.swift	2026-03-20 03:12:24.405105954 +0000
+@@ -0,0 +1,11 @@
++import Foundation
++
++public struct RoutedExecutionResult: Sendable {
++    public let status: ExecutionStatus
++    public let evidence: ExecutionEvidence
++
++    public init(status: ExecutionStatus, evidence: ExecutionEvidence) {
++        self.status = status
++        self.evidence = evidence
++    }
++}
+diff -ruN oracle40_phase3/Sources/OracleOS/Execution/Routing/SystemRouter.swift oracle40_phase4/Sources/OracleOS/Execution/Routing/SystemRouter.swift
+--- oracle40_phase3/Sources/OracleOS/Execution/Routing/SystemRouter.swift	2026-03-20 02:56:08.385301007 +0000
++++ oracle40_phase4/Sources/OracleOS/Execution/Routing/SystemRouter.swift	2026-03-20 03:12:24.408931556 +0000
+@@ -23,7 +23,7 @@
+     public func execute(
+         _ command: Command,
+         policyDecision: PolicyDecision
+-    ) async throws -> ExecutionOutcome {
++    ) async throws -> RoutedExecutionResult {
+         guard command.type == .system else {
+             throw RouterError.invalidRoute(expected: .system, actual: command.type)
+         }
+diff -ruN oracle40_phase3/Sources/OracleOS/Execution/Routing/UIRouter.swift oracle40_phase4/Sources/OracleOS/Execution/Routing/UIRouter.swift
+--- oracle40_phase3/Sources/OracleOS/Execution/Routing/UIRouter.swift	2026-03-20 02:56:08.385625405 +0000
++++ oracle40_phase4/Sources/OracleOS/Execution/Routing/UIRouter.swift	2026-03-20 03:12:24.407485943 +0000
+@@ -11,7 +11,7 @@
+     public func execute(
+         _ command: Command,
+         policyDecision: PolicyDecision
+-    ) async throws -> ExecutionOutcome {
++    ) async throws -> RoutedExecutionResult {
+         guard command.type == .ui else {
+             throw RouterError.invalidRoute(expected: .ui, actual: command.type)
+         }
+@@ -47,7 +47,8 @@
+                 artifacts: [],
+                 policyDecision: policyDecision,
+                 router: "ui",
+-                emittedEvents: successEvents(for: command, action: action, result: result)
++                emittedEvents: successEvents(for: command, action: action, result: result),
++                expectedPostconditions: expectedPostconditions(for: action, result: result)
+             )
+         }
+ 
+@@ -143,6 +144,27 @@
+         return events
+     }
+ 
++    private func expectedPostconditions(for action: UIAction, result: ToolResult) -> [ExpectedPostcondition] {
++        var expectations: [ExpectedPostcondition] = []
++        let observedApp = result.context?.app ?? action.app
++        let observedWindow = result.context?.window ?? action.windowTitle
++        let observedURL = result.context?.url ?? action.query.flatMap { raw in
++            URL(string: raw) != nil ? raw : nil
++        }
++
++        switch normalizedActionName(action.name) {
++        case .focus:
++            if let observedApp { expectations.append(.activeApplication(observedApp)) }
++            if let observedWindow { expectations.append(.windowTitleContains(observedWindow)) }
++            if let observedURL { expectations.append(.urlContains(observedURL)) }
++        case .click, .type:
++            if let observedApp { expectations.append(.activeApplication(observedApp)) }
++            if let observedWindow, action.windowTitle != nil { expectations.append(.windowTitleContains(observedWindow)) }
++        }
++
++        return expectations
++    }
++
+     private func makeObservationPayload(
+         result: ToolResult,
+         fallbackApp: String?,
+diff -ruN oracle40_phase3/Sources/OracleOS/Execution/VerifiedExecutor.swift oracle40_phase4/Sources/OracleOS/Execution/VerifiedExecutor.swift
+--- oracle40_phase3/Sources/OracleOS/Execution/VerifiedExecutor.swift	2026-03-20 02:57:33.342725146 +0000
++++ oracle40_phase4/Sources/OracleOS/Execution/VerifiedExecutor.swift	2026-03-20 03:12:24.409664564 +0000
+@@ -11,6 +11,8 @@
+     private let commandRouter: CommandRouter
+     private let preconditionsValidator: PreconditionsValidator
+     private let postconditionsValidator: PostconditionsValidator
++    private let postExecutionObserver: PostExecutionObserver
++    private let outcomeVerifier: OutcomeVerifier
+     private let snapshotProvider: @Sendable () async -> WorldModelSnapshot
+ 
+     public init(
+@@ -18,12 +20,16 @@
+         commandRouter: CommandRouter = CommandRouter(),
+         preconditionsValidator: PreconditionsValidator = PreconditionsValidator(),
+         postconditionsValidator: PostconditionsValidator = PostconditionsValidator(),
++        postExecutionObserver: PostExecutionObserver = PostExecutionObserver(),
++        outcomeVerifier: OutcomeVerifier = OutcomeVerifier(),
+         snapshotProvider: @escaping @Sendable () async -> WorldModelSnapshot
+     ) {
+         self.policyEngine = policyEngine
+         self.commandRouter = commandRouter
+         self.preconditionsValidator = preconditionsValidator
+         self.postconditionsValidator = postconditionsValidator
++        self.postExecutionObserver = postExecutionObserver
++        self.outcomeVerifier = outcomeVerifier
+         self.snapshotProvider = snapshotProvider
+     }
+ 
+@@ -72,37 +78,53 @@
+         }
+ 
+         do {
+-            var outcome = try await commandRouter.execute(command, policyDecision: policyDecision)
++            let routed = try await commandRouter.execute(command, policyDecision: policyDecision)
++            let observed = await postExecutionObserver.observe(
++                command: command,
++                evidence: routed.evidence,
++                snapshotBeforeExecution: snapshot
++            )
++            let report = outcomeVerifier.verify(
++                command: command,
++                snapshotBeforeExecution: snapshot,
++                routedResult: routed,
++                observedAfterExecution: observed,
++                policyDecision: policyDecision,
++                preconditionsPassed: true
++            )
+ 
+-            guard try postconditionsValidator.validate(command, outcome: outcome) else {
+-                return failOutcome(
+-                    command: command,
+-                    status: .postconditionFailed,
+-                    reason: "Postconditions failed",
+-                    preconditionsPassed: true,
+-                    policyDecision: "approved",
+-                    postconditionsPassed: false,
+-                    extraEvents: [started]
+-                )
++            let finalStatus: ExecutionStatus
++            if routed.status == .success && report.postconditionsPassed {
++                finalStatus = .success
++            } else if routed.status == .success {
++                finalStatus = .postconditionFailed
++            } else {
++                finalStatus = routed.status
+             }
+ 
+-            if outcome.events.isEmpty {
+-                outcome = ExecutionOutcome(
+-                    commandID: outcome.commandID,
+-                    status: outcome.status,
+-                    observations: outcome.observations,
+-                    artifacts: outcome.artifacts,
+-                    events: [
+-                        started,
+-                        makeEvent(
+-                            command: command,
+-                            eventType: EventKinds.commandSucceeded,
+-                            payload: CommandLifecyclePayload(status: "success")
+-                        ),
+-                    ],
+-                    verifierReport: outcome.verifierReport
++            let terminalEventType = finalStatus == .success ? EventKinds.commandSucceeded : EventKinds.commandFailed
++            let terminalReason = report.notes.joined(separator: "; ")
++            let terminalEvent = makeEvent(
++                command: command,
++                eventType: terminalEventType,
++                payload: CommandLifecyclePayload(
++                    status: finalStatus.rawValue,
++                    reason: terminalReason.isEmpty ? nil : terminalReason
+                 )
+-            }
++            )
++            let allEvents = [started] + routed.evidence.events + [terminalEvent]
++            let evidence = routed.evidence.withEvents(allEvents)
++            let outcome = ExecutionOutcome(
++                commandID: command.id,
++                status: finalStatus,
++                observations: evidence.observations,
++                artifacts: evidence.artifacts,
++                events: allEvents,
++                verifierReport: report,
++                evidence: evidence
++            )
++
++            _ = try postconditionsValidator.validate(command, outcome: outcome)
+             return outcome
+         } catch {
+             return failOutcome(
+@@ -141,13 +163,15 @@
+                 payload: CommandLifecyclePayload(status: status.rawValue, reason: reason)
+             )
+         )
++        let evidence = ExecutionEvidence(notes: [reason]).withEvents(events)
+         return ExecutionOutcome(
+             commandID: command.id,
+             status: status,
+             observations: [],
+             artifacts: [],
+             events: events,
+-            verifierReport: report
++            verifierReport: report,
++            evidence: evidence
+         )
+     }
+ 
+diff -ruN oracle40_phase3/Sources/OracleOS/Runtime/RuntimeOrchestrator.swift oracle40_phase4/Sources/OracleOS/Runtime/RuntimeOrchestrator.swift
+--- oracle40_phase3/Sources/OracleOS/Runtime/RuntimeOrchestrator.swift	2026-03-20 02:57:33.352899534 +0000
++++ oracle40_phase4/Sources/OracleOS/Runtime/RuntimeOrchestrator.swift	2026-03-20 03:12:24.410334486 +0000
+@@ -30,6 +30,8 @@
+             ),
+             preconditionsValidator: PreconditionsValidator(),
+             postconditionsValidator: postconditionsValidator,
++            postExecutionObserver: PostExecutionObserver(automationHost: automationHost),
++            outcomeVerifier: OutcomeVerifier(),
+             snapshotProvider: { [commitCoordinator] in
+                 await commitCoordinator.snapshot()
+             }
+diff -ruN oracle40_phase3/Tests/OracleOSTests/Governance/RuntimeWiringTests.swift oracle40_phase4/Tests/OracleOSTests/Governance/RuntimeWiringTests.swift
+--- oracle40_phase3/Tests/OracleOSTests/Governance/RuntimeWiringTests.swift	1970-01-01 00:00:00.000000000 +0000
++++ oracle40_phase4/Tests/OracleOSTests/Governance/RuntimeWiringTests.swift	2026-03-20 03:12:24.411571861 +0000
+@@ -0,0 +1,32 @@
++import Foundation
++import XCTest
++
++final class RuntimeWiringTests: XCTestCase {
++    private func repositoryRoot() -> URL {
++        var url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
++        let fm = FileManager.default
++        while true {
++            if fm.fileExists(atPath: url.appendingPathComponent("Package.swift").path) { return url }
++            let parent = url.deletingLastPathComponent()
++            if parent.path == url.path { return url }
++            url = parent
++        }
++    }
++
++    private func read(_ relativePath: String) throws -> String {
++        try String(contentsOf: repositoryRoot().appendingPathComponent(relativePath), encoding: .utf8)
++    }
++
++    func test_verified_executor_owns_independent_verification_dependencies() throws {
++        let source = try read("Sources/OracleOS/Execution/VerifiedExecutor.swift")
++        XCTAssertTrue(source.contains("postExecutionObserver"))
++        XCTAssertTrue(source.contains("outcomeVerifier"))
++        XCTAssertTrue(source.contains("commandRouter.execute"))
++    }
++
++    func test_command_router_no_longer_writes_verifier_truth() throws {
++        let source = try read("Sources/OracleOS/Execution/Routing/CommandRouter.swift")
++        XCTAssertFalse(source.contains("postconditionsPassed: true"))
++        XCTAssertFalse(source.contains("VerifierReport("))
++    }
++}
+diff -ruN oracle40_phase3/Tests/OracleOSTests/RuntimeTests/PostExecutionVerificationTests.swift oracle40_phase4/Tests/OracleOSTests/RuntimeTests/PostExecutionVerificationTests.swift
+--- oracle40_phase3/Tests/OracleOSTests/RuntimeTests/PostExecutionVerificationTests.swift	1970-01-01 00:00:00.000000000 +0000
++++ oracle40_phase4/Tests/OracleOSTests/RuntimeTests/PostExecutionVerificationTests.swift	2026-03-20 03:12:24.411287964 +0000
+@@ -0,0 +1,68 @@
++import Foundation
++import XCTest
++@testable import OracleOS
++
++final class PostExecutionVerificationTests: XCTestCase {
++    func test_outcome_verifier_marks_file_change_verified_when_readback_matches_patch() {
++        let command = Command(
++            type: .code,
++            payload: .code(CodeAction(name: "modifyFile", filePath: "/tmp/demo.txt", patch: "patched", workspacePath: "/tmp")),
++            metadata: CommandMetadata(intentID: UUID())
++        )
++
++        let artifact = ArtifactPayload(kind: "patch", identifier: "/tmp/demo.txt", data: "patched".data(using: .utf8))
++        let routed = RoutedExecutionResult(
++            status: .success,
++            evidence: ExecutionEvidence(
++                artifacts: [artifact],
++                expectedPostconditions: [.fileExists("/tmp/demo.txt"), .fileContentsChanged("/tmp/demo.txt")]
++            )
++        )
++        let observed = PostExecutionObservation(
++            fileExistsByPath: ["/tmp/demo.txt": true],
++            fileContentsByPath: ["/tmp/demo.txt": "patched"]
++        )
++
++        let report = OutcomeVerifier().verify(
++            command: command,
++            snapshotBeforeExecution: WorldModelSnapshot(repositoryRoot: "/tmp"),
++            routedResult: routed,
++            observedAfterExecution: observed,
++            policyDecision: PolicyDecision(allowed: true, reason: nil),
++            preconditionsPassed: true
++        )
++
++        XCTAssertTrue(report.postconditionsPassed)
++    }
++
++    func test_outcome_verifier_marks_missing_readback_as_failure() {
++        let command = Command(
++            type: .code,
++            payload: .code(CodeAction(name: "modifyFile", filePath: "/tmp/demo.txt", patch: "patched", workspacePath: "/tmp")),
++            metadata: CommandMetadata(intentID: UUID())
++        )
++
++        let routed = RoutedExecutionResult(
++            status: .success,
++            evidence: ExecutionEvidence(
++                expectedPostconditions: [.fileExists("/tmp/demo.txt"), .fileContentsChanged("/tmp/demo.txt")]
++            )
++        )
++        let observed = PostExecutionObservation(
++            fileExistsByPath: ["/tmp/demo.txt": false],
++            fileContentsByPath: [:]
++        )
++
++        let report = OutcomeVerifier().verify(
++            command: command,
++            snapshotBeforeExecution: WorldModelSnapshot(repositoryRoot: "/tmp"),
++            routedResult: routed,
++            observedAfterExecution: observed,
++            policyDecision: PolicyDecision(allowed: true, reason: nil),
++            preconditionsPassed: true
++        )
++
++        XCTAssertFalse(report.postconditionsPassed)
++        XCTAssertTrue(report.notes.contains(where: { $0.contains("file missing") }))
++    }
++}

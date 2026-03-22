@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "code-agent-runtime"
+version = "0.7.0"
+description = "Bounded code agent runtime with GitHub App wiring, multi-language validation, reflection staging, repo profiles, command overrides, flaky-aware retries, provenance reporting, smarter issue parsing/localization, richer bounded patch strategies, stricter guardrails, and SWE-bench-style evaluation"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "PyYAML>=6.0",
+  "requests>=2.31",
+  "PyJWT[crypto]>=2.8",
+]
+
+[tool.setuptools.packages.find]
+include = [
+  "apps*",
+  "runtime*",
+  "domains*",
+  "tests*",
+]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]

@@ -1,0 +1,5 @@
+{
+  "name": "buggy-repo",
+  "language": "python",
+  "bug": "empty token stream causes parser failure"
+}

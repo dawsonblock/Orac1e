@@ -1,0 +1,8 @@
+language: rust
+image: rust:1.76-slim-bookworm
+markers:
+  - Cargo.toml
+  - Cargo.lock
+globs:
+  - "**/*.rs"
+marker_weight: 10

@@ -1,0 +1,545 @@
+diff -ruN oracle40_phase2/Sources/OracleOS/Execution/PreconditionsValidator.swift oracle40_phase3/Sources/OracleOS/Execution/PreconditionsValidator.swift
+--- oracle40_phase2/Sources/OracleOS/Execution/PreconditionsValidator.swift	2026-03-20 00:00:59.000000000 +0000
++++ oracle40_phase3/Sources/OracleOS/Execution/PreconditionsValidator.swift	2026-03-20 02:57:33.332434211 +0000
+@@ -1,58 +1,95 @@
+ import Foundation
+ 
+ /// Validates preconditions before command execution.
+-/// Returns false if required conditions are not met.
++/// Throws when required committed-state conditions are not met.
+ public struct PreconditionsValidator: Sendable {
+     public init() {}
+-    
+-    public func validate(_ command: Command, state: WorldStateModel) throws -> Bool {
+-        // Get current state snapshot for validation
+-        let snapshot = state.snapshot
+-        
+-        // Validate based on command domain
+-        switch command.kind {
+-        // UI Commands require active application context
+-        case "clickElement", "typeText", "focusWindow", "readElement":
++
++    public func validate(_ command: Command, snapshot: WorldModelSnapshot) throws {
++        switch command.payload {
++        case .ui(let action):
++            try validateUI(action, snapshot: snapshot)
++        case .code(let action):
++            try validateCode(action, snapshot: snapshot)
++        case .shell(let spec):
++            try validateShell(spec, snapshot: snapshot)
++        }
++
++        let zeroUUID = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
++        guard command.metadata.intentID != zeroUUID else {
++            throw PreconditionError.invalidIntentID
++        }
++
++        guard command.metadata.confidence >= 0.5 else {
++            throw PreconditionError.lowConfidence(command.metadata.confidence)
++        }
++    }
++
++    private func validateUI(_ action: UIAction, snapshot: WorldModelSnapshot) throws {
++        let requiresActiveApplication: Set<String> = [
++            "clickElement",
++            "typeText",
++            "focusWindow",
++            "readElement",
++            "click",
++            "type",
++            "focus",
++            "read",
++        ]
++
++        if requiresActiveApplication.contains(action.name) {
+             guard snapshot.activeApplication != nil else {
+                 throw PreconditionError.noActiveApplication
+             }
++        }
++
++        if requiresActiveApplication.contains(action.name) || action.windowTitle != nil {
+             guard !snapshot.modalPresent else {
+                 throw PreconditionError.modalPresent
+             }
+-            
+-        // Code Commands require repository context
+-        case "searchRepository", "modifyFile", "runBuild", "runTests", "readFile":
++        }
++    }
++
++    private func validateCode(_ action: CodeAction, snapshot: WorldModelSnapshot) throws {
++        let requiresRepository: Set<String> = [
++            "searchRepository",
++            "modifyFile",
++            "runBuild",
++            "runTests",
++            "readFile",
++            "search",
++            "editFile",
++            "writeFile",
++        ]
++
++        if requiresRepository.contains(action.name) {
+             guard snapshot.repositoryRoot != nil else {
+                 throw PreconditionError.noRepositoryContext
+             }
+-            // Block dangerous operations on dirty git state
+-            if command.kind == "modifyFile" && snapshot.isGitDirty {
+-                throw PreconditionError.gitDirty
+-            }
+-            
+-        // System Commands require app context and no modal
+-        case "launchApp", "openURL":
+-            guard !snapshot.modalPresent else {
+-                throw PreconditionError.modalPresent
+-            }
+-            
+-        default:
+-            // Unknown command kind - fail safe
+-            throw PreconditionError.unknownCommand(command.kind)
+         }
+-        
+-        // Validate metadata has required intent ID
+-        let zeroUUID = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+-        guard command.metadata.intentID != zeroUUID else {
+-            throw PreconditionError.invalidIntentID
++
++        if action.name == "modifyFile" && snapshot.isGitDirty {
++            throw PreconditionError.gitDirty
+         }
+-        
+-        // Validate confidence threshold
+-        guard command.metadata.confidence >= 0.5 else {
+-            throw PreconditionError.lowConfidence(command.metadata.confidence)
++    }
++
++    private func validateShell(_ spec: CommandSpec, snapshot: WorldModelSnapshot) throws {
++        let requiresRepository: Set<CodeCommandCategory> = [
++            .build,
++            .test,
++            .formatter,
++            .linter,
++            .gitStatus,
++            .gitBranch,
++            .gitCommit,
++            .gitPush,
++        ]
++
++        if requiresRepository.contains(spec.category) {
++            guard snapshot.repositoryRoot != nil else {
++                throw PreconditionError.noRepositoryContext
++            }
+         }
+-        
+-        return true
+     }
+ }
+ 
+@@ -62,17 +99,15 @@
+     case modalPresent
+     case noRepositoryContext
+     case gitDirty
+-    case unknownCommand(String)
+     case invalidIntentID
+     case lowConfidence(Double)
+-    
++
+     public var description: String {
+         switch self {
+         case .noActiveApplication: return "No active application context"
+         case .modalPresent: return "Modal dialog present - cannot execute"
+         case .noRepositoryContext: return "No repository context for code command"
+         case .gitDirty: return "Git working directory is dirty"
+-        case .unknownCommand(let kind): return "Unknown command kind: \(kind)"
+         case .invalidIntentID: return "Invalid or missing intent ID in metadata"
+         case .lowConfidence(let confidence): return "Confidence \(confidence) below threshold 0.5"
+         }
+diff -ruN oracle40_phase2/Sources/OracleOS/Execution/VerifiedExecutor.swift oracle40_phase3/Sources/OracleOS/Execution/VerifiedExecutor.swift
+--- oracle40_phase2/Sources/OracleOS/Execution/VerifiedExecutor.swift	2026-03-20 02:47:59.786940185 +0000
++++ oracle40_phase3/Sources/OracleOS/Execution/VerifiedExecutor.swift	2026-03-20 02:57:33.342725146 +0000
+@@ -9,16 +9,22 @@
+ public actor VerifiedExecutor {
+     private let policyEngine: PolicyEngine
+     private let commandRouter: CommandRouter
++    private let preconditionsValidator: PreconditionsValidator
+     private let postconditionsValidator: PostconditionsValidator
++    private let snapshotProvider: @Sendable () async -> WorldModelSnapshot
+ 
+     public init(
+         policyEngine: PolicyEngine = .shared,
+         commandRouter: CommandRouter = CommandRouter(),
+-        postconditionsValidator: PostconditionsValidator = PostconditionsValidator()
++        preconditionsValidator: PreconditionsValidator = PreconditionsValidator(),
++        postconditionsValidator: PostconditionsValidator = PostconditionsValidator(),
++        snapshotProvider: @escaping @Sendable () async -> WorldModelSnapshot
+     ) {
+         self.policyEngine = policyEngine
+         self.commandRouter = commandRouter
++        self.preconditionsValidator = preconditionsValidator
+         self.postconditionsValidator = postconditionsValidator
++        self.snapshotProvider = snapshotProvider
+     }
+ 
+     /// Execute a validated command and return outcome with events.
+@@ -29,12 +35,31 @@
+             eventType: EventKinds.commandStarted,
+             payload: CommandLifecyclePayload(status: "started")
+         )
++
++        let snapshot = await snapshotProvider()
++        do {
++            try preconditionsValidator.validate(command, snapshot: snapshot)
++        } catch {
++            return failOutcome(
++                command: command,
++                status: .preconditionFailed,
++                reason: error.localizedDescription,
++                preconditionsPassed: false,
++                policyDecision: "not_evaluated",
++                postconditionsPassed: false,
++                extraEvents: [started]
++            )
++        }
++
+         let policyDecision = try policyEngine.validate(command)
+         guard policyDecision.allowed else {
+             return failOutcome(
+                 command: command,
+                 status: .policyBlocked,
+                 reason: policyDecision.reason ?? "Policy rejected",
++                preconditionsPassed: true,
++                policyDecision: "blocked",
++                postconditionsPassed: false,
+                 extraEvents: [
+                     started,
+                     makeEvent(
+@@ -54,6 +79,9 @@
+                     command: command,
+                     status: .postconditionFailed,
+                     reason: "Postconditions failed",
++                    preconditionsPassed: true,
++                    policyDecision: "approved",
++                    postconditionsPassed: false,
+                     extraEvents: [started]
+                 )
+             }
+@@ -81,6 +109,9 @@
+                 command: command,
+                 status: .failed,
+                 reason: error.localizedDescription,
++                preconditionsPassed: true,
++                policyDecision: "approved",
++                postconditionsPassed: false,
+                 extraEvents: [started]
+             )
+         }
+@@ -90,13 +121,16 @@
+         command: Command,
+         status: ExecutionStatus,
+         reason: String,
++        preconditionsPassed: Bool,
++        policyDecision: String,
++        postconditionsPassed: Bool,
+         extraEvents: [EventEnvelope] = []
+     ) -> ExecutionOutcome {
+         let report = VerifierReport(
+             commandID: command.id,
+-            preconditionsPassed: status != .preconditionFailed,
+-            policyDecision: status == .policyBlocked ? reason : "approved",
+-            postconditionsPassed: status != .postconditionFailed,
++            preconditionsPassed: preconditionsPassed,
++            policyDecision: policyDecision,
++            postconditionsPassed: postconditionsPassed,
+             notes: [reason]
+         )
+         var events = extraEvents
+diff -ruN oracle40_phase2/Sources/OracleOS/Runtime/RuntimeOrchestrator.swift oracle40_phase3/Sources/OracleOS/Runtime/RuntimeOrchestrator.swift
+--- oracle40_phase2/Sources/OracleOS/Runtime/RuntimeOrchestrator.swift	2026-03-20 00:00:59.000000000 +0000
++++ oracle40_phase3/Sources/OracleOS/Runtime/RuntimeOrchestrator.swift	2026-03-20 02:57:33.352899534 +0000
+@@ -28,7 +28,11 @@
+                 workspaceRunner: workspaceRunner,
+                 repositoryIndexer: repositoryIndexer
+             ),
+-            postconditionsValidator: postconditionsValidator
++            preconditionsValidator: PreconditionsValidator(),
++            postconditionsValidator: postconditionsValidator,
++            snapshotProvider: { [commitCoordinator] in
++                await commitCoordinator.snapshot()
++            }
+         )
+     }
+ 
+@@ -130,7 +134,7 @@
+         case .partialSuccess:
+             outcome = .partialSuccess
+         }
+-        
++
+         return IntentResponse(
+             intentID: intent.id,
+             outcome: outcome,
+diff -ruN oracle40_phase2/Tests/OracleOSTests/Governance/ExecutionBoundaryTests.swift oracle40_phase3/Tests/OracleOSTests/Governance/ExecutionBoundaryTests.swift
+--- oracle40_phase2/Tests/OracleOSTests/Governance/ExecutionBoundaryTests.swift	2026-03-20 00:00:59.000000000 +0000
++++ oracle40_phase3/Tests/OracleOSTests/Governance/ExecutionBoundaryTests.swift	2026-03-20 02:57:33.362458627 +0000
+@@ -5,75 +5,90 @@
+ /// Verifies that ONLY VerifiedExecutor may produce side effects.
+ /// INVARIANT: No planner, controller, or memory module may call execution actions.
+ final class ExecutionBoundaryTests: XCTestCase {
+-    
+-    // MARK: - Planner cannot execute
+-    
+-    func test_planner_may_not_execute() {
+-        // Planners must NOT import Execution/Actions
+-        // This test verifies the protocol layer separation
+-        let command = ClickElementCommand(
+-            metadata: CommandMetadata(intentID: UUID()),
+-            targetID: "test",
+-            applicationBundleID: "com.test"
++    private func repositoryRoot() -> URL {
++        var url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
++        let fm = FileManager.default
++        while true {
++            if fm.fileExists(atPath: url.appendingPathComponent("Package.swift").path) { return url }
++            let parent = url.deletingLastPathComponent()
++            if parent.path == url.path { return url }
++            url = parent
++        }
++    }
++
++    private func read(_ relativePath: String) throws -> String {
++        try String(contentsOf: repositoryRoot().appendingPathComponent(relativePath), encoding: .utf8)
++    }
++
++    private func uiCommand(intentID: UUID = UUID()) -> Command {
++        Command(
++            type: .ui,
++            payload: .ui(UIAction(name: "clickElement", app: "com.test.app", query: "button#ok")),
++            metadata: CommandMetadata(intentID: intentID)
++        )
++    }
++
++    private func codeCommand(intentID: UUID = UUID()) -> Command {
++        Command(
++            type: .code,
++            payload: .code(CodeAction(name: "modifyFile", filePath: "/tmp/test.swift", workspacePath: "/tmp/repo")),
++            metadata: CommandMetadata(intentID: intentID)
++        )
++    }
++
++    private func systemCommand(intentID: UUID = UUID()) -> Command {
++        Command(
++            type: .system,
++            payload: .shell(CommandSpec(
++                category: .build,
++                executable: "/usr/bin/swift",
++                arguments: ["build"],
++                workspaceRoot: "/tmp/repo",
++                summary: "swift build"
++            )),
++            metadata: CommandMetadata(intentID: intentID)
+         )
+-        
+-        // Planners should only produce Commands, not execute them
++    }
++
++    func test_planner_may_not_execute() {
++        let command = uiCommand()
+         XCTAssertEqual(command.kind, "clickElement")
+         XCTAssertFalse(String(describing: type(of: MainPlanner.self)).contains("execute"))
+     }
+-    
+-    // MARK: - Controller may only use IntentAPI
+-    
+-    func test_controller_may_not_call_executor() {
+-        // Controller may only use IntentAPI
+-        // Verify IntentAPI protocol exists and has correct signature
+-        // The protocol must have submitIntent and queryState methods
+-        let protocolMethods = ["submitIntent", "queryState"]
+-        for method in protocolMethods {
+-            XCTAssertTrue(true, "IntentAPI.\(method) verified")
+-        }
+-        // Verify RuntimeOrchestrator conforms to actor pattern (cannot be directly instantiated by controller)
+-        XCTAssertTrue(true, "RuntimeOrchestrator is an actor - isolated from controller")
++
++    func test_controller_may_only_use_intent_api_surface() throws {
++        let protocolSource = try read("Sources/OracleOS/API/IntentAPI.swift")
++        XCTAssertTrue(protocolSource.contains("submitIntent"))
++        XCTAssertTrue(protocolSource.contains("queryState"))
++
++        let bridgeSource = try read("Sources/OracleControllerHost/ControllerRuntimeBridge.swift")
++        XCTAssertFalse(bridgeSource.contains("VerifiedExecutor("))
++        XCTAssertTrue(bridgeSource.contains("RuntimeOrchestrator("))
+     }
+-    
+-    // MARK: - Validators must validate
+-    
++
+     func test_preconditions_validator_rejects_invalid_state() {
+         let validator = PreconditionsValidator()
+-        let state = WorldStateModel()
+-        let command = ClickElementCommand(
+-            metadata: CommandMetadata(intentID: UUID()),
+-            targetID: "test",
+-            applicationBundleID: "com.test"
+-        )
+-        
+-        // Should reject command when no active application
+-        XCTAssertThrowsError(try validator.validate(command, state: state))
++        let command = uiCommand()
++        XCTAssertThrowsError(try validator.validate(command, snapshot: WorldModelSnapshot()))
+     }
+-    
++
+     func test_safety_validator_rejects_dangerous_patterns() {
+         let validator = SafetyValidator()
+         let state = WorldStateModel()
+-        
+-        let dangerousCommand = ModifyFileCommand(
+-            metadata: CommandMetadata(intentID: UUID(), rationale: "rm -rf /"),
+-            filePath: "/test",
+-            patch: "test"
++        let dangerousCommand = Command(
++            type: .code,
++            payload: .code(CodeAction(name: "modifyFile", filePath: "/test", patch: "test")),
++            metadata: CommandMetadata(intentID: UUID(), rationale: "rm -rf /")
+         )
+-        
+-        // Should reject command with dangerous rationale
++
+         let result = validator.isSafe(dangerousCommand, state: state)
+         XCTAssertFalse(result.safe)
+     }
+-    
++
+     func test_postconditions_validator_rejects_failed_outcome() {
+         let validator = PostconditionsValidator()
+-        let command = ClickElementCommand(
+-            metadata: CommandMetadata(intentID: UUID()),
+-            targetID: "test",
+-            applicationBundleID: "com.test"
+-        )
+-        
++        let command = uiCommand()
++
+         let failedOutcome = ExecutionOutcome(
+             commandID: command.id,
+             status: .failed,
+@@ -85,37 +100,16 @@
+                 postconditionsPassed: false
+             )
+         )
+-        
+-        // Should reject failed execution
++
+         XCTAssertThrowsError(try validator.validate(command, outcome: failedOutcome))
+     }
+-    
+-    // MARK: - Command routing
+-    
++
+     func test_command_router_identifies_domains() {
+-        let uiCommand = ClickElementCommand(
+-            metadata: CommandMetadata(intentID: UUID()),
+-            targetID: "test",
+-            applicationBundleID: "com.test"
+-        )
+-        
+-        let codeCommand = SearchRepositoryCommand(
+-            metadata: CommandMetadata(intentID: UUID()),
+-            query: "test"
+-        )
+-        
+-        let systemCommand = LaunchAppCommand(
+-            metadata: CommandMetadata(intentID: UUID()),
+-            bundleID: "com.test"
+-        )
+-        
+-        XCTAssertEqual(CommandRouter.domain(for: uiCommand), .ui)
+-        XCTAssertEqual(CommandRouter.domain(for: codeCommand), .code)
+-        XCTAssertEqual(CommandRouter.domain(for: systemCommand), .system)
+-    }
+-    
+-    // MARK: - Event store append-only
+-    
++        XCTAssertEqual(CommandRouter.domain(for: uiCommand()), .ui)
++        XCTAssertEqual(CommandRouter.domain(for: codeCommand()), .code)
++        XCTAssertEqual(CommandRouter.domain(for: systemCommand()), .system)
++    }
++
+     func test_event_store_is_append_only() async {
+         let store = EventStore()
+         let envelope = EventEnvelope(
+@@ -125,27 +119,22 @@
+             eventType: "test",
+             payload: Data()
+         )
+-        
++
+         await store.append(envelope)
+         let all = await store.all()
+-        
++
+         XCTAssertEqual(all.count, 1)
+         XCTAssertEqual(all.first?.eventType, "test")
+     }
+-    
+-    // MARK: - Commit coordinator immutability
+-    
++
+     func test_commit_coordinator_returns_immutable_snapshot() async {
+         let store = EventStore()
+         let coordinator = CommitCoordinator(
+             eventStore: store,
+-            reducers: []
++            reducers: DefaultReducers.make()
+         )
+-        
+-        // snapshot() should return a value type (WorldModelSnapshot)
++
+         let snapshot = await coordinator.snapshot()
+-        
+-        // Verify it's a value type by checking it's independent
+         XCTAssertNotNil(snapshot)
+     }
+ }
+diff -ruN oracle40_phase2/Tests/OracleOSTests/Governance/RuntimeInvariantTests.swift oracle40_phase3/Tests/OracleOSTests/Governance/RuntimeInvariantTests.swift
+--- oracle40_phase2/Tests/OracleOSTests/Governance/RuntimeInvariantTests.swift	2026-03-20 00:00:59.000000000 +0000
++++ oracle40_phase3/Tests/OracleOSTests/Governance/RuntimeInvariantTests.swift	2026-03-20 02:57:33.371609039 +0000
+@@ -64,7 +64,9 @@
+         XCTAssertFalse(orchestrator.contains("public func execute"))
+         XCTAssertFalse(orchestrator.contains("public func commit"))
+         XCTAssertFalse(orchestrator.contains("public func evaluate"))
+-        XCTAssertTrue(orchestrator.contains("try await execute(command, state: state)"))
++        XCTAssertTrue(orchestrator.contains("snapshotProvider"))
++        XCTAssertTrue(orchestrator.contains("await commitCoordinator.snapshot()"))
++        XCTAssertTrue(orchestrator.contains("PreconditionsValidator()"))
+         XCTAssertFalse(orchestrator.contains("_legacyContext"))
+         XCTAssertTrue(orchestrator.contains("try await commit(executionOutcome)"))
+     }
+diff -ruN oracle40_phase2/Tests/OracleOSTests/RuntimeTests/PreconditionIntegrationTests.swift oracle40_phase3/Tests/OracleOSTests/RuntimeTests/PreconditionIntegrationTests.swift
+--- oracle40_phase2/Tests/OracleOSTests/RuntimeTests/PreconditionIntegrationTests.swift	1970-01-01 00:00:00.000000000 +0000
++++ oracle40_phase3/Tests/OracleOSTests/RuntimeTests/PreconditionIntegrationTests.swift	2026-03-20 02:57:33.381415796 +0000
+@@ -0,0 +1,23 @@
++import Foundation
++import XCTest
++@testable import OracleOS
++
++final class PreconditionIntegrationTests: XCTestCase {
++    func test_verified_executor_returns_precondition_failed_before_routing() async throws {
++        let executor = VerifiedExecutor(
++            snapshotProvider: { WorldModelSnapshot() }
++        )
++
++        let command = Command(
++            type: .ui,
++            payload: .ui(UIAction(name: "clickElement", app: "com.test.app", query: "button#ok")),
++            metadata: CommandMetadata(intentID: UUID())
++        )
++
++        let outcome = try await executor.execute(command)
++
++        XCTAssertEqual(outcome.status, .preconditionFailed)
++        XCTAssertEqual(outcome.verifierReport.preconditionsPassed, false)
++        XCTAssertEqual(outcome.verifierReport.policyDecision, "not_evaluated")
++    }
++}

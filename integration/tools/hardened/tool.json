@@ -1,0 +1,29 @@
+{
+  "id": "hardened",
+  "name": "Hardened Code Worker",
+  "version": "1.0.0",
+  "api_version": "1.0",
+  "kind": "worker",
+  "capabilities": [
+    "worker.code.patch",
+    "worker.code.issue_fix"
+  ],
+  "base_url": "http://127.0.0.1:8789",
+  "health_path": "/health",
+  "invoke_path": "/invoke",
+  "risk_level": "medium",
+  "repo_languages": ["python"],
+  "timeouts": {
+    "health_ms": 2000,
+    "invoke_ms": 180000
+  },
+  "concurrency": {
+    "max_global": 2,
+    "max_per_repo": 1
+  },
+  "features": {
+    "supports_diff": true,
+    "supports_streaming": false,
+    "supports_cancellation": false
+  }
+}

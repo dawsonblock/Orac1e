@@ -1,0 +1,6 @@
+mode: docker
+network: none
+pull_policy: never
+timeout_seconds: 120
+detect_language: true
+image_policy_root: domains/code/language_profiles

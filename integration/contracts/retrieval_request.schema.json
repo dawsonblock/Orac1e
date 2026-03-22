@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "repo_name",
+    "repo_path",
+    "query"
+  ],
+  "properties": {
+    "repo_name": {
+      "type": "string"
+    },
+    "repo_path": {
+      "type": "string"
+    },
+    "query": {
+      "type": "string"
+    },
+    "top_k": {
+      "type": "integer",
+      "default": 10
+    }
+  }
+}

@@ -1,0 +1,57 @@
+# macOS
+.DS_Store
+
+# Local editor settings
+.vscode/
+.kilocode/
+
+# Swift
+.build/
+.swiftpm/
+*.bc
+*.xcodeproj/
+*.xcworkspace/
+!OracleController.xcworkspace/
+!OracleController.xcworkspace/**
+!OracleController.xcodeproj/
+!OracleController.xcodeproj/**
+DerivedData/
+*.o
+*.dylib
+
+# Python
+vision-sidecar/.venv/
+.venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+__pycache__/
+*.pyc
+*.pyo
+venv/
+env/
+.env
+
+# PyInstaller (if used)
+vision-sidecar/build/
+vision-sidecar/dist/
+*.spec
+
+# Artifacts
+build.log
+test.log
+build_output.txt
+test_output.txt
+ghost-os-*.tar.gz
+oracle-os-*.tar.gz
+local/
+.oracle-graph/
+dist/
+coverage/
+node_modules/
+web/node_modules/
+web/dist/
+
+.fake
+# local proof capture
+ProofArtifacts/

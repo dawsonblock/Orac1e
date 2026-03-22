@@ -1,0 +1,1 @@
+{"repo": "acme/repo", "repo_path": "/repos/acme-repo", "issue_number": 1, "title": "Fix inc", "body": "File: src/calc.py\nReplace: return x + 2\nWith: return x + 1\nTests: tests/test_calc.py\n", "base_ref": "main", "labels": ["agent:fix"]}

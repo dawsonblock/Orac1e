@@ -1,0 +1,372 @@
+diff -ruN /mnt/data/oracle40_phase5_base/.github/workflows/apisec-scan.yml /mnt/data/oracle40_phase5/.github/workflows/apisec-scan.yml
+--- /mnt/data/oracle40_phase5_base/.github/workflows/apisec-scan.yml	2026-03-20 03:32:50.630551952 +0000
++++ /mnt/data/oracle40_phase5/.github/workflows/apisec-scan.yml	2026-03-20 03:32:36.842784515 +0000
+@@ -63,8 +63,8 @@
+           apisec-username: ${{ secrets.APISEC_USERNAME }}
+           # The Password of the APIsec user with which the scans will be executed
+           apisec-password: ${{ secrets.APISEC_PASSWORD }}
+-          # The name of the project for security scan
+-          apisec-project: "VAmPI"
++          # Repository-specific project name. Replace this if your APIsec project uses a different label.
++          apisec-project: "Oracle-OS"
+           # The name of the sarif format result file The file is written only if this property is provided.
+           sarif-result-file: "apisec-results.sarif"
+       - name: Import results
+diff -ruN /mnt/data/oracle40_phase5_base/Sources/OracleOS/Engineering/PatchPipeline.swift /mnt/data/oracle40_phase5/Sources/OracleOS/Engineering/PatchPipeline.swift
+--- /mnt/data/oracle40_phase5_base/Sources/OracleOS/Engineering/PatchPipeline.swift	2026-03-20 03:32:50.721179371 +0000
++++ /mnt/data/oracle40_phase5/Sources/OracleOS/Engineering/PatchPipeline.swift	2026-03-20 03:32:36.843543019 +0000
+@@ -8,7 +8,7 @@
+     public let workspaceRelativePath: String
+     /// Replacement content proposed by the strategy.
+     public let proposedContent: String
+-    /// Number of tests fixed in sandbox validation.
++    /// Heuristic estimate of tests fixed in sandbox validation. Not a harness-backed claim.
+     public let testsFixed: Int
+     /// Number of regressions introduced (0 is ideal).
+     public let regressions: Int
+@@ -18,6 +18,7 @@
+     public let origin: String
+ 
+     /// Composite rank: `tests_fixed − regressions − dependency_impact`.
++    /// This remains heuristic until a real build/test harness is wired in.
+     /// Higher is better.
+     public var rank: Int { testsFixed - regressions - dependencyImpact }
+ }
+@@ -52,6 +53,7 @@
+ /// Default implementation uses lightweight heuristics. Replace with a real
+ /// `swift build` / `swift test` harness in integration environments.
+ public struct SandboxEvaluation: Sendable {
++    /// Heuristic parse/sanity pass result, not proof of compiler success.
+     public let compiled: Bool
+     public let testsFixed: Int
+     public let regressions: Int
+@@ -253,8 +255,8 @@
+ 
+     /// Lightweight heuristic evaluator.
+     ///
+-    /// Checks for unbalanced braces and obvious type mismatches, then
+-    /// estimates `testsFixed` from the presence of defensive patterns.
++    /// Checks for unbalanced braces and simple defensive-pattern markers only.
++    /// These outputs are heuristic and are not equivalent to `swift build` or `swift test`.
+     public static let defaultEvaluator: SandboxEvaluatorFn = { _, content, _ in
+         let openBraces = content.filter { $0 == "{" }.count
+         let closeBraces = content.filter { $0 == "}" }.count
+diff -ruN /mnt/data/oracle40_phase5_base/Tests/OracleOSTests/Governance/RuntimeWiringTests.swift /mnt/data/oracle40_phase5/Tests/OracleOSTests/Governance/RuntimeWiringTests.swift
+--- /mnt/data/oracle40_phase5_base/Tests/OracleOSTests/Governance/RuntimeWiringTests.swift	2026-03-20 03:12:24.411571861 +0000
++++ /mnt/data/oracle40_phase5/Tests/OracleOSTests/Governance/RuntimeWiringTests.swift	2026-03-20 03:32:38.760382070 +0000
+@@ -29,4 +29,13 @@
+         XCTAssertFalse(source.contains("postconditionsPassed: true"))
+         XCTAssertFalse(source.contains("VerifierReport("))
+     }
++
++    func test_live_entry_points_use_default_reducers() throws {
++        let controller = try read("Sources/OracleControllerHost/ControllerRuntimeBridge.swift")
++        let mcp = try read("Sources/OracleOS/MCP/MCPDispatch.swift")
++        XCTAssertTrue(controller.contains("DefaultReducers.make()"))
++        XCTAssertTrue(mcp.contains("DefaultReducers.make()"))
++        XCTAssertFalse(controller.contains("reducers: []"))
++        XCTAssertFalse(mcp.contains("reducers: []"))
++    }
+ }
+diff -ruN /mnt/data/oracle40_phase5_base/Tests/OracleOSTests/RuntimeTests/EventReplayTests.swift /mnt/data/oracle40_phase5/Tests/OracleOSTests/RuntimeTests/EventReplayTests.swift
+--- /mnt/data/oracle40_phase5_base/Tests/OracleOSTests/RuntimeTests/EventReplayTests.swift	2026-03-20 03:32:50.980025511 +0000
++++ /mnt/data/oracle40_phase5/Tests/OracleOSTests/RuntimeTests/EventReplayTests.swift	2026-03-20 03:32:37.026292151 +0000
+@@ -2,76 +2,73 @@
+ @testable import OracleOS
+ 
+ /// Verifies that a runtime cycle can be replayed from event history
+-/// and produce the same committed state snapshot — Milestone E.
++/// and produce the same committed state snapshot.
+ final class EventReplayTests: XCTestCase {
+ 
+-    // MARK: - Core replay invariant
+-
+-    /// Replaying the same sequence of events through reducers must always
+-    /// produce an identical state snapshot — deterministic reducer output.
+     func test_event_replay_produces_deterministic_state() async throws {
+         let store1 = EventStore()
+         let coordinator1 = CommitCoordinator(
+             eventStore: store1,
+-            reducers: [RuntimeStateReducer(), UIStateReducer(), ProjectStateReducer()]
++            reducers: DefaultReducers.make()
+         )
+ 
+-        // Commit a sequence of events
+         let commandID = CommandID()
+         let intentID = UUID()
++        let repoPayload = try JSONEncoder().encode(RepositoryObservedPayload(
++            repositoryRoot: "/tmp/repo",
++            activeBranch: "main",
++            isGitDirty: true,
++            openFileCount: 3
++        ))
++        let buildPayload = try JSONEncoder().encode(BuildCompletedPayload(succeeded: false))
++
+         let envelopes = [
+-            EventEnvelope(sequenceNumber: 0, commandID: commandID, intentID: intentID,
+-                          eventType: "commandIssued", payload: Data()),
+-            EventEnvelope(sequenceNumber: 0, commandID: commandID, intentID: intentID,
+-                          eventType: "actionStarted", payload: Data()),
+-            EventEnvelope(sequenceNumber: 0, commandID: commandID, intentID: intentID,
+-                          eventType: "actionCompleted", payload: Data())
++            EventEnvelope(sequenceNumber: 1, commandID: commandID, intentID: intentID,
++                          eventType: EventKinds.repositoryObserved, payload: repoPayload),
++            EventEnvelope(sequenceNumber: 2, commandID: commandID, intentID: intentID,
++                          eventType: EventKinds.buildCompleted, payload: buildPayload),
++            EventEnvelope(sequenceNumber: 3, commandID: commandID, intentID: intentID,
++                          eventType: EventKinds.commandSucceeded, payload: Data())
+         ]
+ 
+         try await coordinator1.commit(envelopes)
+         let snapshot1 = await coordinator1.snapshot()
+ 
+-        // Replay the same events into a fresh coordinator
+         let allEvents = await store1.all()
+         let store2 = EventStore()
+         let coordinator2 = CommitCoordinator(
+             eventStore: store2,
+-            reducers: [RuntimeStateReducer(), UIStateReducer(), ProjectStateReducer()]
++            reducers: DefaultReducers.make()
+         )
+         try await coordinator2.commit(allEvents)
+         let snapshot2 = await coordinator2.snapshot()
+ 
+-        // Both snapshots must represent identical state
+-        XCTAssertEqual(allEvents.count, 3, "Three events must be committed")
+-        XCTAssertNotNil(snapshot1)
+-        XCTAssertNotNil(snapshot2)
+-        // Both snapshots derived from same event sequence — verify cycle counts match
+-        XCTAssertEqual(
+-            snapshot1.cycleCount,
+-            snapshot2.cycleCount,
+-            "Replayed state must match original committed state"
+-        )
++        XCTAssertEqual(allEvents.count, 3)
++        XCTAssertEqual(snapshot1.repositoryRoot, snapshot2.repositoryRoot)
++        XCTAssertEqual(snapshot1.activeBranch, snapshot2.activeBranch)
++        XCTAssertEqual(snapshot1.isGitDirty, snapshot2.isGitDirty)
++        XCTAssertEqual(snapshot1.buildSucceeded, snapshot2.buildSucceeded)
++        XCTAssertEqual(snapshot1.cycleCount, snapshot2.cycleCount)
++        XCTAssertEqual(snapshot1.lastSequenceNumber, snapshot2.lastSequenceNumber)
+     }
+ 
+-    /// EventReplay struct must reconstruct a timeline from event history.
+     func test_event_replay_builds_timeline() async throws {
+         let store = EventStore()
+         let commandID = CommandID()
+         let cycleID = UUID()
+ 
+-        // Append events directly for replay test
+         await store.append(EventEnvelope(
+             sequenceNumber: 1,
+             commandID: commandID,
+             intentID: cycleID,
+-            eventType: "actionStarted",
++            eventType: EventKinds.commandStarted,
+             payload: Data()
+         ))
+         await store.append(EventEnvelope(
+             sequenceNumber: 2,
+             commandID: commandID,
+             intentID: cycleID,
+-            eventType: "actionCompleted",
++            eventType: EventKinds.commandSucceeded,
+             payload: Data()
+         ))
+ 
+@@ -79,10 +76,9 @@
+         let timeline = try await replay.replay(cycleID: cycleID)
+ 
+         XCTAssertEqual(timeline.events.count, 2)
+-        XCTAssertFalse(timeline.events.isEmpty, "Timeline must contain replayed events")
++        XCTAssertFalse(timeline.events.isEmpty)
+     }
+ 
+-    /// TimelineBuilder produces a timeline with the correct event order.
+     func test_timeline_builder_preserves_event_order() {
+         let events = [
+             EventEnvelope(sequenceNumber: 1, commandID: nil, intentID: nil, eventType: "first", payload: Data()),
+@@ -96,22 +92,24 @@
+         XCTAssertEqual(timeline.events[2].eventType, "third")
+     }
+ 
+-    /// CommitCoordinator snapshot reflects committed event history.
+-    func test_snapshot_reflects_committed_events() async throws {
++    func test_snapshot_reflects_committed_events_with_default_reducers() async throws {
+         let store = EventStore()
+-        let coordinator = CommitCoordinator(eventStore: store, reducers: [])
++        let coordinator = CommitCoordinator(eventStore: store, reducers: DefaultReducers.make())
+ 
+         let initial = await coordinator.snapshot()
+-        XCTAssertEqual(initial.cycleCount, 0, "Initial cycle count must be zero")
++        XCTAssertEqual(initial.cycleCount, 0)
+ 
+-        // Commit events — reducers are empty so state stays the same,
+-        // but event count in store grows
++        let payload = try JSONEncoder().encode(AppFocusedPayload(appName: "com.apple.Safari"))
+         try await coordinator.commit([
+-            EventEnvelope(sequenceNumber: 0, commandID: nil, intentID: nil, eventType: "e1", payload: Data()),
+-            EventEnvelope(sequenceNumber: 0, commandID: nil, intentID: nil, eventType: "e2", payload: Data())
++            EventEnvelope(sequenceNumber: 1, commandID: nil, intentID: nil, eventType: EventKinds.appFocused, payload: payload),
++            EventEnvelope(sequenceNumber: 2, commandID: nil, intentID: nil, eventType: EventKinds.commandSucceeded, payload: Data())
+         ])
+ 
++        let snapshot = await coordinator.snapshot()
+         let eventsInStore = await store.all()
+-        XCTAssertEqual(eventsInStore.count, 2, "Events must be stored after commit")
++        XCTAssertEqual(eventsInStore.count, 2)
++        XCTAssertEqual(snapshot.activeApplication, "com.apple.Safari")
++        XCTAssertEqual(snapshot.cycleCount, 1)
++        XCTAssertEqual(snapshot.lastSequenceNumber, 2)
+     }
+ }
+diff -ruN /mnt/data/oracle40_phase5_base/docs/ARCHITECTURE_STATUS.md /mnt/data/oracle40_phase5/docs/ARCHITECTURE_STATUS.md
+--- /mnt/data/oracle40_phase5_base/docs/ARCHITECTURE_STATUS.md	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/oracle40_phase5/docs/ARCHITECTURE_STATUS.md	2026-03-20 03:32:35.099489685 +0000
+@@ -0,0 +1,24 @@
++# Architecture Status
++
++This file records where the architecture is currently strong and where it is still provisional.
++
++## Strong
++
++- One public runtime submission surface: `RuntimeOrchestrator.submitIntent(_:)`
++- One side-effect boundary: `VerifiedExecutor`
++- One committed-state writer: `CommitCoordinator`
++- Shared reducer bundle for the live controller and MCP paths
++- Typed domain events projected into committed state
++
++## Provisional
++
++- Some verification paths still depend on limited evidence rather than full environment re-observation
++- Repair/patch ranking is still heuristic
++- Some governance coverage is source-wiring based rather than end-to-end behavioral
++
++## Required follow-on work
++
++1. Replace heuristic build/test validation with a real sandbox harness.
++2. Strengthen system-command verification.
++3. Expand reducer replay tests to cover more event families.
++4. Validate the controller path on macOS CI with permissions-aware test coverage.
+diff -ruN /mnt/data/oracle40_phase5_base/docs/GOVERNANCE.md /mnt/data/oracle40_phase5/docs/GOVERNANCE.md
+--- /mnt/data/oracle40_phase5_base/docs/GOVERNANCE.md	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/oracle40_phase5/docs/GOVERNANCE.md	2026-03-20 03:32:35.075581004 +0000
+@@ -0,0 +1,52 @@
++# Governance Contract
++
++This document defines the repo-level rules that the implementation is expected to satisfy.
++It is normative. When code and documentation disagree, the code must be changed or this file must be updated.
++
++## 1. Execution boundary
++
++1. `VerifiedExecutor.execute(_:)` is the only execution boundary allowed to produce runtime side effects.
++2. Surfaces such as Controller, MCP, CLI, and recipes may submit intents and query state. They may not execute commands directly.
++3. Routers may report what they attempted and what they observed locally. They may not decide final verification truth.
++
++## 2. Committed state
++
++1. `CommitCoordinator.commit(_:)` is the only committed-state write path.
++2. Reducers derive committed state from appended events.
++3. Live entry points must use the shared default reducer set. Empty reducer arrays are not valid for the controller or MCP runtime.
++4. Replay of the same event stream must converge to the same committed snapshot.
++
++## 3. Planning boundary
++
++1. Planners terminate at `Command` generation.
++2. Planning code may not import or call execution internals for direct side effects.
++3. Runtime orchestration remains linear:
++   `Intent -> plan -> execute -> commit -> evaluate`.
++
++## 4. Verification rules
++
++1. Preconditions are checked against committed state before routing execution.
++2. Policy gating occurs before execution.
++3. Postconditions are determined from independent read-back or other evidence outside the router's self-report.
++4. A command may route successfully and still fail verification.
++
++## 5. Repair pipeline honesty
++
++1. Heuristic patch scoring must be labeled as heuristic.
++2. Terms such as "compiled" or "tests fixed" are only strong claims when backed by a real harness.
++3. Experimental repair code must not be described as verified autonomous program repair.
++
++## 6. Documentation and workflow truth
++
++1. README and architecture docs may only link to files that exist.
++2. CI workflow configuration must refer to this repository's project names or clearly marked placeholders.
++3. Governance tests must assert behavior or source wiring. Placeholder assertions are not acceptable.
++
++## 7. Failing closed
++
++When policy, state, or verification is ambiguous, the runtime should fail closed rather than infer success.
++
++Related documents:
++- [runtime_invariants.md](runtime_invariants.md)
++- [ARCHITECTURE.md](../ARCHITECTURE.md)
++- [runtime_spine.md](architecture/runtime_spine.md)
+diff -ruN /mnt/data/oracle40_phase5_base/docs/STATUS.md /mnt/data/oracle40_phase5/docs/STATUS.md
+--- /mnt/data/oracle40_phase5_base/docs/STATUS.md	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/oracle40_phase5/docs/STATUS.md	2026-03-20 03:32:35.087472906 +0000
+@@ -0,0 +1,25 @@
++# Status
++
++Current status is mixed.
++
++## What is structurally real
++
++- Single intent entry path through `RuntimeOrchestrator`
++- `VerifiedExecutor` as the execution boundary
++- Shared command routing across controller, MCP, CLI, and recipes
++- Committed-state projection through reducers in live controller and MCP paths
++- Typed event families for runtime, UI, code, and memory updates
++- Precondition checks against committed state before execution
++- Independent post-execution verification owned by `VerifiedExecutor`
++
++## What remains shallow
++
++- Build and test verification still relies partly on emitted evidence rather than a full rerun harness
++- System-command verification is still thin
++- Patch-pipeline scoring remains heuristic
++- macOS-only surfaces need validation on macOS CI, not Linux parsing alone
++
++## What this repo should claim today
++
++This repository is a real macOS operator/runtime project with a credible execution spine.
++It is not yet a fully hardened deterministic kernel and it should not claim harness-backed autonomous repair.
+diff -ruN /mnt/data/oracle40_phase5_base/docs/progress.md /mnt/data/oracle40_phase5/docs/progress.md
+--- /mnt/data/oracle40_phase5_base/docs/progress.md	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/oracle40_phase5/docs/progress.md	2026-03-20 03:32:35.111124644 +0000
+@@ -0,0 +1,19 @@
++# Progress
++
++## Runtime hardening sequence
++
++### Completed
++
++- Reduced public execution to one orchestrated spine
++- Wired reducers into controller and MCP runtime paths
++- Added typed event families and payload decoding
++- Enforced preconditions in `VerifiedExecutor`
++- Moved final verification truth out of routers and into independent verification
++- Replaced several stale or placeholder governance tests
++
++### Pending
++
++- Real build/test harness for patch validation
++- Stronger system-level postcondition verification
++- Broader reducer replay coverage
++- End-to-end macOS validation for controller and UI paths
+diff -ruN /mnt/data/oracle40_phase5_base/scripts/architecture_guard.py /mnt/data/oracle40_phase5/scripts/architecture_guard.py
+--- /mnt/data/oracle40_phase5_base/scripts/architecture_guard.py	2026-03-20 03:32:51.063790794 +0000
++++ /mnt/data/oracle40_phase5/scripts/architecture_guard.py	2026-03-20 03:32:36.842010388 +0000
+@@ -2,8 +2,8 @@
+ """Architecture guard for Oracle-OS.
+ 
+ Scans Swift source files for forbidden type references that would violate
+-the architectural boundary rules defined in GOVERNANCE.md and
+-ARCHITECTURE_GOVERNANCE.md. Uses word-boundary regex and skips comments.
++the architectural boundary rules defined in docs/GOVERNANCE.md and
++docs/runtime_invariants.md. Uses word-boundary regex and skips comments.
+ 
+ Prevents:
+ - AgentLoop absorbing subsystem internals (Rule 2)

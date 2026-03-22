@@ -1,0 +1,64 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:oracle-build-v5-merged-entrypoints}/third_party/oracle-os",
+            "name": "Debug oracle (third_party/oracle-os)",
+            "target": "oracle",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug oracle (third_party/oracle-os)"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:oracle-build-v5-merged-entrypoints}/third_party/oracle-os",
+            "name": "Release oracle (third_party/oracle-os)",
+            "target": "oracle",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release oracle (third_party/oracle-os)"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:oracle-build-v5-merged-entrypoints}/third_party/oracle-os",
+            "name": "Debug OracleControllerHost (third_party/oracle-os)",
+            "target": "OracleControllerHost",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug OracleControllerHost (third_party/oracle-os)"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:oracle-build-v5-merged-entrypoints}/third_party/oracle-os",
+            "name": "Release OracleControllerHost (third_party/oracle-os)",
+            "target": "OracleControllerHost",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release OracleControllerHost (third_party/oracle-os)"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:oracle-build-v5-merged-entrypoints}/third_party/oracle-os",
+            "name": "Debug OracleController (third_party/oracle-os)",
+            "target": "OracleController",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug OracleController (third_party/oracle-os)"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:oracle-build-v5-merged-entrypoints}/third_party/oracle-os",
+            "name": "Release OracleController (third_party/oracle-os)",
+            "target": "OracleController",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release OracleController (third_party/oracle-os)"
+        }
+    ]
+}

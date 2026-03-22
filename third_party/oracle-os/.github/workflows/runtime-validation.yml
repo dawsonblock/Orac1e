@@ -1,0 +1,61 @@
+name: Runtime Validation
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+
+jobs:
+  validate-macos-runtime:
+    runs-on: macos-15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Show toolchain versions
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+
+      - name: Resolve package dependencies
+        run: swift package resolve
+
+      - name: Build debug
+        run: swift build -c debug
+
+      - name: Build release
+        run: swift build -c release
+
+      - name: Run full test suite
+        run: swift test --parallel
+
+      - name: Run hardening-targeted tests
+        run: |
+          swift test --filter RuntimeWiringTests
+          swift test --filter PreconditionIntegrationTests
+          swift test --filter PostExecutionVerificationTests
+          swift test --filter EventReplayTests
+
+      - name: Build controller app bundle
+        run: ./scripts/build-controller-app.sh --configuration release --skip-sign --output-dir ./dist
+
+      - name: Build release tarball
+        run: ./scripts/build-release.sh --debug
+
+      - name: Upload validation artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: oracle-runtime-validation
+          path: |
+            dist
+            oracle-os-*-macos-arm64.tar.gz
+            .build
