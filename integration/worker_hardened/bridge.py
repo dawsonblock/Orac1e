@@ -38,6 +38,7 @@ class _FallbackPatch:
         self.diff_text = diff_text
         self.changed_files = changed_files
         self.summary = f"heuristic fallback patch ({len(changed_files)} file(s))"
+        self.added_tests: list[str] = []
 
 
 def _task_normalize(req: "ProposeRequest") -> list[tuple[str, str]]:
@@ -65,6 +66,7 @@ def _heuristic_fallback(
     repo_root: Path,
     trace: object,
     plan: object,
+    normalized_hints: list[tuple[str, str]] | None = None,
 ) -> _FallbackPatch | None:
     """Last-resort line-level heuristic patcher.
 
@@ -91,12 +93,18 @@ def _heuristic_fallback(
 
     # Extract (target, replacement) pairs from plan hypotheses
     hypotheses = getattr(plan, "hypotheses", None) or []
+    if isinstance(hypotheses, list) and len(hypotheses) == 1 and hypotheses[0] == "no executable edit hypothesis":
+        hypotheses = []
+
     edits: list[tuple[str, str]] = []
     for h in hypotheses:
         target = getattr(h, "target", None)
         replacement = getattr(h, "replacement", None)
         if target and replacement is not None:
             edits.append((str(target), str(replacement)))
+
+    if not edits and normalized_hints:
+        edits = normalized_hints
 
     if not candidate_files or not edits:
         return None
@@ -105,6 +113,7 @@ def _heuristic_fallback(
     full_diff_lines: list[str] = []
 
     for fpath in candidate_files:
+        print(f"DEBUG: heuristic check file {fpath}", file=sys.stderr)
         try:
             original = fpath.read_text(encoding="utf-8", errors="replace")
         except OSError:
@@ -112,7 +121,9 @@ def _heuristic_fallback(
 
         modified = original
         for target, replacement in edits:
+            print(f"DEBUG: target='{target}' replacement='{replacement}'", file=sys.stderr)
             if target in modified:
+                print(f"DEBUG: found exact match for target in {fpath}", file=sys.stderr)
                 modified = modified.replace(target, replacement, 1)
             else:
                 # Secondary strategy: try normalising whitespace so minor
@@ -120,7 +131,9 @@ def _heuristic_fallback(
                 # prevent a match that is otherwise correct.
                 target_norm = re.sub(r"[ \t]+", " ", target.strip())
                 for line in original.splitlines():
-                    if re.sub(r"[ \t]+", " ", line.strip()) == target_norm:
+                    line_norm = re.sub(r"[ \t]+", " ", line.strip())
+                    if line_norm == target_norm:
+                        print(f"DEBUG: found fuzzy match for target in {fpath} line='{line}'", file=sys.stderr)
                         modified = modified.replace(line, replacement, 1)
                         break
 
@@ -167,9 +180,15 @@ def run_hardened(req: ProposeRequest) -> dict:
     # When the planner formed no hypotheses, inject task-normalised hints so
     # the heuristic fallback has at least one edit to try.
     _hypotheses = getattr(plan, "hypotheses", None) or []
+    # If it's a list with one string "no executable edit hypothesis", treat as empty
+    if isinstance(_hypotheses, list) and len(_hypotheses) == 1 and _hypotheses[0] == "no executable edit hypothesis":
+        _hypotheses = []
+        
+    print(f"DEBUG: effective hypotheses: {_hypotheses}", file=sys.stderr)
     if not _hypotheses:
         _norm_hints = _task_normalize(req)
-        if _norm_hints and not getattr(plan, "hypotheses", None):
+        print(f"DEBUG: normalized hints: {_norm_hints}", file=sys.stderr)
+        if _norm_hints:
             # Synthesise a minimal hypothesis-like object from each hint so
             # _heuristic_fallback's edit loop can process them.
             class _SyntheticHypothesis:
@@ -177,12 +196,13 @@ def run_hardened(req: ProposeRequest) -> dict:
                     self.target = target
                     self.replacement = replacement
 
+            _synth = [_SyntheticHypothesis(t, r) for t, r in _norm_hints]
             if hasattr(plan, "hypotheses"):
                 try:
-                    plan.hypotheses = [
-                        _SyntheticHypothesis(t, r) for t, r in _norm_hints
-                    ]  # type: ignore[assignment]
+                    plan.hypotheses = _synth  # type: ignore[assignment]
+                    print(f"DEBUG: injected hypotheses: {plan.hypotheses}", file=sys.stderr)
                 except AttributeError:
+                    print(f"DEBUG: plan.hypotheses is immutable", file=sys.stderr)
                     pass  # immutable plan object; fallback will use rglob anyway
 
     failure_reason: str | None = None
@@ -195,7 +215,7 @@ def run_hardened(req: ProposeRequest) -> dict:
             worker="hardened",
             attempted_files=getattr(trace, "attempted_files", []),
         )
-        patch = _heuristic_fallback(repo_root, trace, plan)
+        patch = _heuristic_fallback(repo_root, trace, plan, _norm_hints if not _hypotheses else None)
         if patch is not None:
             emit(
                 "propose",
