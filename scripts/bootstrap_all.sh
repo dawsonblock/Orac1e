@@ -14,7 +14,7 @@ if [ ! -d ".venv" ]; then
     echo -e "${BLUE}[bootstrap] 1/6 Creating venv...${NC}"
     python3 -m venv .venv
 else
-    echo -e "${BLUE}[bootstrap] 1/6 Reusing existsing venv...${NC}"
+    echo -e "${BLUE}[bootstrap] 1/6 Reusing existing venv...${NC}"
 fi
 source .venv/bin/activate
 
