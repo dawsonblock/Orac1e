@@ -85,8 +85,11 @@ def is_path_blocked(path: str) -> bool:
         return True
 
     for blocked in BLOCKED_PATH_PREFIXES:
-        base = blocked.rstrip("/")
-        if normalized == base or normalized.startswith(base + "/"):
+        # Normalize the blocked prefix the same way repo paths are normalized
+        # (lstrip "." and "/" characters) so that ".github/" correctly matches
+        # the normalized form "github/..." of a path like ".github/workflows/ci.yml".
+        norm_base = blocked.rstrip("/").lstrip("./")
+        if normalized == norm_base or normalized.startswith(norm_base + "/"):
             return True
     return False
 
