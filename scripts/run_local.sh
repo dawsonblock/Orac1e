@@ -35,6 +35,7 @@ if [[ ! -f "${VENV}/bin/activate" ]]; then
 fi
 
 source "${VENV}/bin/activate"
+python -c "from integration.preflight import check; check()"
 source "${ROOT}/scripts/common.sh"
 load_env
 
@@ -121,7 +122,7 @@ poll_health() {
 
 # ── Services ──────────────────────────────────────────────────────────────────
 
-if yaml_service_enabled "retrieval.enabled"; then
+if yaml_service_enabled "retrieval.broker.enabled"; then
     start_service "retrieval-broker" \
         "integration.retrieval_broker.service:app" \
         "${BROKER_PORT}"
@@ -148,16 +149,7 @@ else
     log "SKIP worker-hardened (disabled in configs/system.yaml)"
 fi
 
-if yaml_service_enabled "run_server.enabled"; then
-    start_service "run-server" \
-        "scripts.serve_coding_runs:app" \
-        "${RUN_SERVER_PORT}"
-    poll_health "run-server" "http://${ORACLE_HOST}:${RUN_SERVER_PORT}/health"
-else
-    log "SKIP run-server (disabled in configs/system.yaml)"
-fi
-
-if [[ "${NO_ORACLE}" == "0" ]] && yaml_service_enabled "oracle.enabled"; then
+if [[ "${NO_ORACLE}" == "0" ]] && yaml_service_enabled "oracle.swift_controller.enabled"; then
     bash "${ROOT}/scripts/start_oracle.sh" || \
         log "WARNING: Oracle Swift process failed to start — Python services are still up"
 elif [[ "${NO_ORACLE}" == "1" ]]; then

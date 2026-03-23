@@ -10,12 +10,9 @@ workers:
     enabled: true
 
 retrieval:
-  enabled: true
+  broker:
+    enabled: true
 
-run_server:
-  enabled: true
-
-# Oracle Swift controller — requires macOS 14 and a successful swift build.
-# Set to false to skip Oracle startup in run_local.sh.
 oracle:
-  enabled: true
+  swift_controller:
+    enabled: false

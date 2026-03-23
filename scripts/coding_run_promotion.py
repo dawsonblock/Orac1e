@@ -571,6 +571,13 @@ def promote_run(
                 "skipped": bool(pre_validation.get("skipped")),
                 "skip_reason": pre_validation.get("skip_reason"),
                 "error_category": pre_validation.get("error_category"),
+                "commands": commands_to_run,
+                "worktree": {
+                    "passed": pre_validation.get("ok", False)
+                },
+                "canonical": {
+                    "passed": post_validation.get("ok", False)
+                }
             },
         }
         _record_promotion(run_id, receipt)

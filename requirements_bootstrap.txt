@@ -14,8 +14,6 @@ cffi==2.0.0
 charset-normalizer==3.4.6
 click==8.3.1
 cocoindex==1.0.0a26
--e git+https://github.com/dawsonblock/Orac1e.git@9cf1d404b5b6ec54cd99e461cc0a389fcca028a0#egg=cocoindex_code&subdirectory=third_party/cocoindex-code
--e git+https://github.com/dawsonblock/Orac1e.git@9cf1d404b5b6ec54cd99e461cc0a389fcca028a0#egg=code_agent_runtime&subdirectory=third_party/code-agent-runtime
 ConfigArgParse==1.7.5
 contourpy==1.3.3
 cryptography==46.0.5
@@ -76,7 +74,6 @@ multidict==6.7.1
 networkx==3.6.1
 numpy==2.4.3
 openai==2.29.0
--e git+https://github.com/dawsonblock/Orac1e.git@9cf1d404b5b6ec54cd99e461cc0a389fcca028a0#egg=oracle_integration
 oslex==0.1.3
 packaging==26.0
 pandas==3.0.1
