@@ -28,11 +28,7 @@ pip install -r requirements.txt > /dev/null
 
 # 4. Install local editable modules
 echo -e "${BLUE}[bootstrap] 4/6 Installing local modules...${NC}"
-pip install -e . > /dev/null
 pip install -e third_party/aider > /dev/null
-pip install -e third_party/code-agent-runtime > /dev/null
-pip install -e third_party/cocoindex-code > /dev/null
-
 # 5. Verify imports
 echo -e "${BLUE}[bootstrap] 5/6 Verifying imports...${NC}"
 python - <<'PY'
