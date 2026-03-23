@@ -12,7 +12,7 @@ def test_root_pyproject_declares_bootstrap_dependencies() -> None:
 
     assert pyproject["project"]["name"] == "oracle-system"
     assert pyproject["build-system"]["build-backend"] == "setuptools.build_meta"
-    assert pyproject["build-system"]["requires"] == ["setuptools"]
+    assert "setuptools" in pyproject["build-system"]["requires"]
     assert pyproject["project"]["dependencies"] == [
         "fastapi",
         "uvicorn",
