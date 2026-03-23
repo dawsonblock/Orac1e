@@ -101,43 +101,67 @@ except urllib.error.HTTPError as e:
 PYTHON
 }
 
-simulate_worker_proposal() {
+real_worker_propose() {
     local run_id="$1"
     local worktree_path="$2"
-    
-    # Create a simple code change in the worktree
-    local app_file="${worktree_path}/src/parser.py"
-    if [[ -f "$app_file" ]]; then
-        echo "# Modified by e2e smoke test" >> "$app_file"
-        echo "def new_function():" >> "$app_file"
-        echo "    pass" >> "$app_file"
-    else
-        mkdir -p "$(dirname "$app_file")"
-        cat > "$app_file" <<EOF
-# Modified by e2e smoke test
-def new_function():
-    pass
-EOF
-    fi
-    
-    # Update run status to validating (simulating worker completion)
-    local runs_file="${ROOT_DIR}/workspace/runs/runs.json"
-    if [[ -f "$runs_file" ]]; then
+    local worker_port="${3:-${AIDER_PORT}}"
+
+    local payload
+    payload=$(
         "${PYTHON_BIN}" - <<PYTHON
-import json
+import json, sys
 from pathlib import Path
 
-runs_file = Path("${runs_file}")
-runs = json.loads(runs_file.read_text())
+metadata_file = Path("${ROOT_DIR}/workspace/runs/metadata/${run_id}.json")
+meta = json.loads(metadata_file.read_text()) if metadata_file.exists() else {}
 
-for run in runs:
-    if run.get('id') == '${run_id}':
-        run['status'] = 'validating'
-        break
-
-runs_file.write_text(json.dumps(runs, indent=2))
+print(json.dumps({
+    "run_id": run_id,
+    "repo_name": "buggy-repo",
+    "repo_path": "${worktree_path}",
+    "mode": "interactive",
+    "task": meta.get("task", "Fix first_token so empty token lists return None instead of raising IndexError"),
+    "context": {
+        "files": meta.get("contextFiles", []),
+        "retrieval": []
+    },
+    "constraints": {
+        "max_files": 6,
+        "max_changed_lines": 300,
+        "allowed_paths": meta.get("allowedPaths", ["src/"])
+    }
+}, indent=2))
+run_id = "${run_id}"
 PYTHON
-    fi
+    )
+
+    log "POSTing /propose to worker on port ${worker_port} for run ${run_id}..."
+    "${PYTHON_BIN}" - <<PYTHON
+import json
+import urllib.request
+import urllib.error
+import sys
+
+url = "http://${ORACLE_HOST}:${worker_port}/propose"
+data = '''${payload}'''.encode('utf-8')
+req = urllib.request.Request(url, data=data, method='POST')
+req.add_header('Content-Type', 'application/json')
+try:
+    with urllib.request.urlopen(req, timeout=120) as resp:
+        body = json.loads(resp.read().decode('utf-8'))
+        diff = body.get('diff', '')
+        touched = body.get('touched_files', [])
+        warnings = body.get('warnings', [])
+        if warnings:
+            print(f"  worker warnings: {warnings}", file=sys.stderr)
+        if not diff.strip():
+            print("ERROR: worker returned empty diff", file=sys.stderr)
+            sys.exit(1)
+        print(f"  worker produced diff touching: {touched}")
+except urllib.error.HTTPError as exc:
+    print(f"ERROR: /propose returned HTTP {exc.code}: {exc.read().decode()}", file=sys.stderr)
+    sys.exit(1)
+PYTHON
 }
 
 # =============================================================================
@@ -283,37 +307,60 @@ for run in runs:
 runs_file.write_text(json.dumps(runs, indent=2))
 PYTHON
 
-# Create worktree and make a change
+# Create worktree from fixture repo so the worker has an isolated tree to edit
 WORKTREE_PATH="${ROOT_DIR}/workspace/worktrees/${RUN_ID}"
-mkdir -p "$(dirname "$WORKTREE_PATH")"
+mkdir -p "${ROOT_DIR}/workspace/worktrees"
 
-# Create worktree from fixture repo
 if [[ -d "${FIXTURE_REPO_DIR}/.git" ]]; then
-    git -C "${FIXTURE_REPO_DIR}" worktree add --detach "$WORKTREE_PATH" HEAD 2>/dev/null || true
+    git -C "${FIXTURE_REPO_DIR}" worktree add --detach "${WORKTREE_PATH}" HEAD
+else
+    log "ERROR: fixture repo has no .git directory: ${FIXTURE_REPO_DIR}"
+    exit 1
 fi
 
-# Make a code change in worktree
-simulate_worker_proposal "$RUN_ID" "$WORKTREE_PATH"
-
-# Step 5: Validation (simulating validation pipeline)
-log_step "Running validation"
-
-# Update status to validating then awaiting_approval
+# Update metadata with the real worktree path now that it exists
 "${PYTHON_BIN}" - <<PYTHON
 import json
 from pathlib import Path
+mf = Path("${METADATA_DIR}/${RUN_ID}.json")
+meta = json.loads(mf.read_text())
+meta["worktreePath"] = "${WORKTREE_PATH}"
+mf.write_text(json.dumps(meta, indent=2))
+PYTHON
 
+# Call the real worker /propose endpoint; exits nonzero if diff is empty
+real_worker_propose "${RUN_ID}" "${WORKTREE_PATH}" "${AIDER_PORT}"
+
+# Confirm the worktree has uncommitted changes
+DIFF_STAT=$(git -C "${WORKTREE_PATH}" diff --stat HEAD 2>/dev/null || true)
+if [[ -z "${DIFF_STAT}" ]]; then
+    log "ERROR: worktree has no changes after worker ran"
+    exit 1
+fi
+log "Worktree diff confirmed:"
+echo "${DIFF_STAT}" | sed 's/^/  /'
+
+# Commit the worktree changes so promote_run can capture them as a patch
+git -C "${WORKTREE_PATH}" add -A
+git -C "${WORKTREE_PATH}" -c user.email="smoke@e2e" -c user.name="E2E" \
+    commit -m "smoke: worker proposal for ${RUN_ID}"
+
+# Advance run status to awaiting_approval
+"${PYTHON_BIN}" - <<PYTHON
+import json
+from pathlib import Path
 runs_file = Path("${RUNS_DIR}/runs.json")
 runs = json.loads(runs_file.read_text())
-
 for run in runs:
     if run.get('id') == '${RUN_ID}':
         run['status'] = 'awaiting_approval'
-        run['updatedAt'] = "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+        run['updatedAt'] = "$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
         break
-
 runs_file.write_text(json.dumps(runs, indent=2))
 PYTHON
+
+# Step 5: Validation is handled atomically inside promote_run; no separate step needed.
+log_step "Run ready for approval (validation runs inside promote_run)"
 
 # Step 6: Assert awaiting_approval status
 log_step "Verifying awaiting_approval status"
@@ -335,8 +382,6 @@ approve_run_via_api "$RUN_ID" "e2e-tester" "E2E smoke test approval"
 
 # Step 8: Verify canonical repo content changed
 log_step "Verifying canonical repo changed"
-
-sleep 2  # Give time for promotion to complete
 
 CANONICAL_AFTER=$(cat "${FIXTURE_REPO_DIR}/src/parser.py" 2>/dev/null || echo "")
 

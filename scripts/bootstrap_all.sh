@@ -24,7 +24,7 @@ die() { echo "[bootstrap] ERROR: $*" >&2; exit 1; }
 
 # ── Resolve a Python >=3.11 interpreter ──────────────────────────────────────
 _resolve_python311() {
-    for candidate in python3.12 python3.11; do
+    for candidate in python3.13 python3.12 python3.11; do
         if command -v "${candidate}" >/dev/null 2>&1; then
             local ver
             ver=$("${candidate}" -c 'import sys; print(sys.version_info[:2])')

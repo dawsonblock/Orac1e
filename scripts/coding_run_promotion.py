@@ -430,6 +430,7 @@ def promote_run(
     
     if not has_validation and allow_no_validation:
         # Skip validation entirely if explicitly allowed
+        commands_to_run: list[str] = []
         pre_validation = {
             "ok": True,
             "steps": [{"name": "validation_skipped", "ok": True, "stdout": "", "stderr": "", "exitCode": 0, "skipped": True}],
@@ -492,7 +493,9 @@ def promote_run(
             }
             _write_validation_artifact(run_id, post_validation, "canonical")
         else:
-            post_validation = _run_validation(canonical_repo, validation_commands)
+            # Use the same flattened command list that worktree validation used
+            # so both paths execute identical commands when validationStages is present.
+            post_validation = _run_validation(canonical_repo, commands_to_run)
             _write_validation_artifact(run_id, post_validation, "canonical")
             if not post_validation["ok"]:
                 raise PromotionError("canonical validation failed after patch apply")

@@ -2,12 +2,13 @@
 # =============================================================================
 # run_local.sh - Single-command local system startup
 #
-# Activates the venv created by bootstrap_all.sh, then starts all four
-# services in dependency order with health polling between each step:
+# Activates the venv created by bootstrap_all.sh, then starts services that
+# are enabled in configs/system.yaml in dependency order:
 #
 #   retrieval broker → aider worker → hardened worker → run server
 #
-# Oracle Swift process (if built) is started last.
+# Oracle Swift process is started last unless --no-oracle is given or
+# oracle.enabled=false in configs/system.yaml.
 #
 # Usage:
 #   bash scripts/run_local.sh [--no-oracle] [--skip-health]
@@ -45,6 +46,39 @@ export PYTHONPATH="${ROOT}:${ROOT}/third_party/code-agent-runtime:${PYTHONPATH:-
 export CODE_AGENT_REPO_PATH="${ROOT}/third_party/code-agent-runtime"
 
 log() { echo "[run_local] $*"; }
+
+# Read configs/system.yaml and return 0 (enabled) or 1 (disabled) for a
+# dotted key path such as "retrieval.enabled" or "workers.aider.enabled".
+# Defaults to enabled when the key is absent or PyYAML is unavailable.
+yaml_service_enabled() {
+    local key_path="$1"
+    python - "${ROOT}/configs/system.yaml" "${key_path}" <<'PY'
+import sys
+from pathlib import Path
+try:
+    import yaml
+except ImportError:
+    sys.exit(0)  # default: enabled
+cfg_path = Path(sys.argv[1])
+if not cfg_path.exists():
+    sys.exit(0)  # default: enabled
+with cfg_path.open() as fh:
+    cfg = yaml.safe_load(fh) or {}
+keys = sys.argv[2].split(".")
+val = cfg
+for k in keys:
+    if not isinstance(val, dict) or k not in val:
+        sys.exit(0)  # key absent → enabled by default
+    val = val[k]
+# val may be a bool or a dict with an "enabled" key
+if isinstance(val, bool):
+    sys.exit(0 if val else 1)
+if isinstance(val, dict):
+    enabled = val.get("enabled", True)
+    sys.exit(0 if enabled else 1)
+sys.exit(0)  # unknown shape → enabled by default
+PY
+}
 
 start_service() {
     local name="$1"
@@ -87,29 +121,49 @@ poll_health() {
 
 # ── Services ──────────────────────────────────────────────────────────────────
 
-start_service "retrieval-broker" \
-    "integration.retrieval_broker.service:app" \
-    "${BROKER_PORT}"
-poll_health "retrieval-broker" "http://${ORACLE_HOST}:${BROKER_PORT}/health"
+if yaml_service_enabled "retrieval.enabled"; then
+    start_service "retrieval-broker" \
+        "integration.retrieval_broker.service:app" \
+        "${BROKER_PORT}"
+    poll_health "retrieval-broker" "http://${ORACLE_HOST}:${BROKER_PORT}/health"
+else
+    log "SKIP retrieval-broker (disabled in configs/system.yaml)"
+fi
 
-start_service "worker-aider" \
-    "integration.worker_aider.service:app" \
-    "${AIDER_PORT}"
-poll_health "worker-aider" "http://${ORACLE_HOST}:${AIDER_PORT}/health"
+if yaml_service_enabled "workers.aider.enabled"; then
+    start_service "worker-aider" \
+        "integration.worker_aider.service:app" \
+        "${AIDER_PORT}"
+    poll_health "worker-aider" "http://${ORACLE_HOST}:${AIDER_PORT}/health"
+else
+    log "SKIP worker-aider (disabled in configs/system.yaml)"
+fi
 
-start_service "worker-hardened" \
-    "integration.worker_hardened.service:app" \
-    "${HARDENED_PORT}"
-poll_health "worker-hardened" "http://${ORACLE_HOST}:${HARDENED_PORT}/health"
+if yaml_service_enabled "workers.hardened.enabled"; then
+    start_service "worker-hardened" \
+        "integration.worker_hardened.service:app" \
+        "${HARDENED_PORT}"
+    poll_health "worker-hardened" "http://${ORACLE_HOST}:${HARDENED_PORT}/health"
+else
+    log "SKIP worker-hardened (disabled in configs/system.yaml)"
+fi
 
-start_service "run-server" \
-    "scripts.serve_coding_runs:app" \
-    "${RUN_SERVER_PORT}"
-poll_health "run-server" "http://${ORACLE_HOST}:${RUN_SERVER_PORT}/health"
+if yaml_service_enabled "run_server.enabled"; then
+    start_service "run-server" \
+        "scripts.serve_coding_runs:app" \
+        "${RUN_SERVER_PORT}"
+    poll_health "run-server" "http://${ORACLE_HOST}:${RUN_SERVER_PORT}/health"
+else
+    log "SKIP run-server (disabled in configs/system.yaml)"
+fi
 
-if [[ "${NO_ORACLE}" == "0" ]]; then
+if [[ "${NO_ORACLE}" == "0" ]] && yaml_service_enabled "oracle.enabled"; then
     bash "${ROOT}/scripts/start_oracle.sh" || \
         log "WARNING: Oracle Swift process failed to start — Python services are still up"
+elif [[ "${NO_ORACLE}" == "1" ]]; then
+    log "SKIP oracle (--no-oracle flag)"
+else
+    log "SKIP oracle (disabled in configs/system.yaml)"
 fi
 
 echo ""

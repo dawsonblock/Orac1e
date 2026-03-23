@@ -1,4 +1,15 @@
 #!/usr/bin/env bash
+# =============================================================================
+# DEPRECATED — use scripts/bootstrap_all.sh instead.
+#
+# This script creates three separate per-service virtual environments under
+# workspace/venvs/ (the old operational model).  It is kept for reference and
+# for CI pipelines that have not yet migrated to the unified .venv/ model.
+#
+# New path:  bash scripts/bootstrap_all.sh
+# New start: bash scripts/run_local.sh
+# =============================================================================
+# shellcheck disable=SC2317
 set -euo pipefail
 
 # shellcheck source=scripts/common.sh

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import difflib
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -58,6 +59,15 @@ def _heuristic_fallback(
         if (repo_root / f).is_file()
     ]
 
+    # If the planner found no candidates at all, fall back to a broad search
+    # over all Python source files in the repo so a hard-coded single-file
+    # fixture is still reachable.
+    if not candidate_files:
+        candidate_files = [
+            p for p in repo_root.rglob("*.py")
+            if ".git" not in p.parts and "__pycache__" not in p.parts
+        ]
+
     # Extract (target, replacement) pairs from plan hypotheses
     hypotheses = getattr(plan, "hypotheses", None) or []
     edits: list[tuple[str, str]] = []
@@ -83,6 +93,15 @@ def _heuristic_fallback(
         for target, replacement in edits:
             if target in modified:
                 modified = modified.replace(target, replacement, 1)
+            else:
+                # Secondary strategy: try normalising whitespace so minor
+                # indentation differences or trailing-space mismatches do not
+                # prevent a match that is otherwise correct.
+                target_norm = re.sub(r"[ \t]+", " ", target.strip())
+                for line in original.splitlines():
+                    if re.sub(r"[ \t]+", " ", line.strip()) == target_norm:
+                        modified = modified.replace(line, replacement, 1)
+                        break
 
         if modified == original:
             continue
