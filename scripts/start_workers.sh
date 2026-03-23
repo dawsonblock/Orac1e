@@ -19,11 +19,15 @@ fi
 export AIDER_BIN="${AIDER_BIN:-${python_aider} -m aider.main}"
 export CODE_AGENT_REPO_PATH
 
-export PYTHONPATH="${ROOT_DIR}:${AIDER_REPO_PATH}:${CODE_AGENT_REPO_PATH}${PYTHONPATH:+:${PYTHONPATH}}"
+# Snapshot the inherited PYTHONPATH before any mutations so each worker gets
+# an isolated path that does not leak the other worker's dependencies.
+BASE_PYTHONPATH="${PYTHONPATH:-}"
+
+export PYTHONPATH="${ROOT_DIR}:${AIDER_REPO_PATH}:${CODE_AGENT_REPO_PATH}${BASE_PYTHONPATH:+:${BASE_PYTHONPATH}}"
 start_background_service   aider   "${python_aider}" -m uvicorn integration.worker_aider.service:app     --host "${ORACLE_HOST}"     --port "${AIDER_PORT}"
 wait_for_http_ok "http://${ORACLE_HOST}:${AIDER_PORT}/health" 60
 
-export PYTHONPATH="${ROOT_DIR}:${CODE_AGENT_REPO_PATH}${PYTHONPATH:+:${PYTHONPATH}}"
+export PYTHONPATH="${ROOT_DIR}:${CODE_AGENT_REPO_PATH}${BASE_PYTHONPATH:+:${BASE_PYTHONPATH}}"
 start_background_service   hardened   "${python_hardened}" -m uvicorn integration.worker_hardened.service:app     --host "${ORACLE_HOST}"     --port "${HARDENED_PORT}"
 wait_for_http_ok "http://${ORACLE_HOST}:${HARDENED_PORT}/health" 60
 

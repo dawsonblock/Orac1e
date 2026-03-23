@@ -12,7 +12,7 @@ resolve_python_bin() {
     return 0
   fi
   local candidate
-  for candidate in python3.12 python3.11 python3; do
+  for candidate in python3.13 python3.12 python3.11 python3; do
     if command -v "${candidate}" >/dev/null 2>&1; then
       echo "$(command -v "${candidate}")"
       return 0
@@ -245,6 +245,7 @@ install_pyproject_dependencies() {
 
   local deps_file
   deps_file="$(mktemp)"
+  trap 'rm -f "${deps_file}"' RETURN
   "${PYTHON_BIN}" - "${pyproject_file}" >"${deps_file}" <<'PY'
 import pathlib
 import sys

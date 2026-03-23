@@ -89,12 +89,18 @@ def _append_jsonl(path: Path, item: dict[str, Any]) -> None:
         handle.write(json.dumps(item, sort_keys=True) + "\n")
 
 
-def _run(argv: list[str], cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess[str]:
+def _run(
+    argv: list[str],
+    cwd: Path | None = None,
+    check: bool = True,
+    timeout: int = 30,
+) -> subprocess.CompletedProcess[str]:
     proc = subprocess.run(
         argv,
         cwd=str(cwd) if cwd else None,
         text=True,
         capture_output=True,
+        timeout=timeout,
     )
     if check and proc.returncode != 0:
         raise PromotionError(proc.stderr.strip() or proc.stdout.strip() or f"command failed: {' '.join(argv)}")
@@ -122,7 +128,7 @@ def _replace_run(updated: dict[str, Any]) -> None:
             replaced = True
             break
     if not replaced:
-        runs.append(updated)
+        raise PromotionError(f"run {updated.get('id')!r} not found in runs file; cannot replace")
     _write_json(RUNS_FILE, runs)
 
 
@@ -142,13 +148,14 @@ def _load_metadata(run_id: str) -> dict[str, Any]:
 
 
 def _record_event(run_id: str, event_type: str, payload: dict[str, Any] | None = None) -> None:
+    ts = now_iso()
     _append_jsonl(
         EVENTS_FILE,
         {
-            "id": f"{run_id}:{event_type}:{now_iso()}",
+            "id": f"{run_id}:{event_type}:{ts}",
             "runID": run_id,
             "type": event_type,
-            "ts": now_iso(),
+            "ts": ts,
             "payload": payload or {},
         },
     )
@@ -365,13 +372,24 @@ def promote_run(
     metadata = _load_metadata(run_id)
     canonical_repo = Path(metadata.get("canonicalRepoPath") or run.get("repoPath") or "").resolve()
     worktree_repo = Path(metadata.get("worktreePath") or ROOT / "workspace" / "worktrees" / run_id).resolve()
-    
-    # Support both legacy flat commands and new stage-based validation
+
+    # Resolve validation profile (repo-local .oracle-validation.json takes precedence over defaults)
+    _profile_name, _profile_version, _profile_stages, _profile_allow_no = _resolve_validation_profile(
+        canonical_repo, metadata
+    )
+
+    # Support both legacy flat commands and new stage-based validation.
+    # Metadata values take precedence; resolved profile provides the fallback.
     validation_commands = list(metadata.get("validationCommands") or [])
-    validation_stages = metadata.get("validationStages", [])
-    validation_profile_name = metadata.get("validationProfileName", "default")
-    validation_profile_version = metadata.get("validationProfileVersion", 1)
-    allow_no_validation = allow_no_validation or metadata.get("allowNoValidation", False) or os.environ.get("ORACLE_ALLOW_NO_VALIDATION") == "1"
+    validation_stages = metadata.get("validationStages") or _profile_stages
+    validation_profile_name = metadata.get("validationProfileName") or _profile_name
+    validation_profile_version = metadata.get("validationProfileVersion") or _profile_version
+    allow_no_validation = (
+        allow_no_validation
+        or bool(metadata.get("allowNoValidation"))
+        or _profile_allow_no
+        or os.environ.get("ORACLE_ALLOW_NO_VALIDATION") == "1"
+    )
 
     # Normalized status vocabulary check - load immediately after run
     current_status = run.get("status")
@@ -435,11 +453,11 @@ def promote_run(
             raise PromotionError("worktree validation failed before promotion")
 
     base_commit = _validate_worktree_lineage(canonical_repo, worktree_repo)
-    approval = _record_approval(run_id, "approved", actor, note)
-    _record_event(run_id, "approval.recorded", approval)
 
     pre_status_clean = _repo_is_clean(canonical_repo)
     patch_applied = False
+    canonical_validation_ran: bool = False
+    canonical_validation_skip_reason: str | None = None
 
     try:
         _, patch_file = _capture_patch(worktree_repo, run_id)
@@ -480,6 +498,11 @@ def promote_run(
                 raise PromotionError("canonical validation failed after patch apply")
 
         promotion_commit = _commit_promotion(canonical_repo, run_id)
+
+        # Record approval here — after validation and commit succeed — so the
+        # audit trail is never left with a stale 'approved' entry on failure.
+        approval = _record_approval(run_id, "approved", actor, note)
+        _record_event(run_id, "approval.recorded", approval)
 
         run["status"] = "applied"
         _replace_run(run)
@@ -543,8 +566,8 @@ def promote_run(
             "status": "failed",
             "validation_ok": False,
             "error": str(exc),
-            "canonical_validation_ran": locals().get("canonical_validation_ran", False),
-            "canonical_validation_skip_reason": locals().get("canonical_validation_skip_reason"),
+            "canonical_validation_ran": canonical_validation_ran,
+            "canonical_validation_skip_reason": canonical_validation_skip_reason,
             "validation": {
                 "mode": "skipped" if _pre.get("skipped") else "full",
                 "ok": False,

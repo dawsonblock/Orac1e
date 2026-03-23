@@ -72,7 +72,31 @@ def _enrich_run_with_detail(run: dict[str, Any]) -> dict[str, Any]:
 def list_runs() -> list[dict[str, Any]]:
     """List all runs with enriched detail including events, approvals, and promotions."""
     runs = _read_json(RUNS_FILE, [])
-    return [_enrich_run_with_detail(run) for run in runs]
+    if not runs:
+        return []
+
+    # Build per-run-id indexes once instead of re-scanning JSONL files for every run.
+    def _index_by_run(path: Path) -> dict[str, list[dict[str, Any]]]:
+        idx: dict[str, list[dict[str, Any]]] = {}
+        for item in _read_jsonl(path):
+            key = item.get("runID") or item.get("run_id") or ""
+            if key:
+                idx.setdefault(key, []).append(item)
+        return idx
+
+    events_idx = _index_by_run(EVENTS_FILE)
+    approvals_idx = _index_by_run(APPROVALS_FILE)
+    promotions_idx = _index_by_run(PROMOTIONS_FILE)
+
+    def _enrich_fast(run: dict[str, Any]) -> dict[str, Any]:
+        rid = run.get("id") or ""
+        enriched = dict(run)
+        enriched["_events"] = events_idx.get(rid, [])
+        enriched["_approvals"] = approvals_idx.get(rid, [])
+        enriched["_promotions"] = promotions_idx.get(rid, [])
+        return enriched
+
+    return [_enrich_fast(run) for run in runs]
 
 
 @app.get("/runs/{run_id}")
@@ -145,12 +169,10 @@ def reject_endpoint(run_id: str, body: ApprovalBody) -> dict[str, Any]:
 
     current_status = run.get("status")
     if current_status == "rejected":
-        result = reject_run(run_id, actor=body.actor, note=body.note)
         updated_run = get_run(run_id)
         return {
             "ok": True,
-            "idempotent": False,
-            "rejection": result,
+            "idempotent": True,
             "run": updated_run
         }
 

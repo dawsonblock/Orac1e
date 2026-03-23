@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 import tempfile
 from pathlib import Path
 
@@ -13,7 +14,8 @@ from integration.worker_aider.normalize_diff import normalize_diff
 def _resolve_aider_bin() -> list[str]:
     value = os.environ.get('AIDER_BIN')
     if value:
-        return value.split()
+        # shlex.split handles quoted paths and arguments with embedded spaces.
+        return shlex.split(value)
     return ['python', '-m', 'aider.main']
 
 

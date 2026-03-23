@@ -166,12 +166,15 @@ class TestValidationPolicyEnforcement:
         assert "src/utils.py" in violations
 
     def test_stage1_path_budget_empty_allowlist(self, sample_diff):
-        """Stage 1: Verify empty allowlist behavior."""
-        # When allowlist is empty, enforce_path_budget returns empty list
-        # (no paths are checked against empty allowlist)
+        """Stage 1: Empty allowlist is fail-closed — every touched file is a violation."""
+        # When allowlist is empty there are no permitted paths, so all touched
+        # files must be returned as violations (fail-closed security posture).
         violations = enforce_path_budget(sample_diff, [])
-        # The function returns [] for empty allowlist - this is the documented behavior
-        assert violations == [], f"Empty allowlist returns empty violations: {violations}"
+        touched = extract_touched_files(sample_diff)
+        assert set(violations) == set(touched), (
+            f"Empty allowlist must flag all touched files; "
+            f"got violations={violations}, touched={touched}"
+        )
 
     def test_stage2_formatter_linter_detection(self):
         """Stage 2: Verify formatter/linter detection in validation profiles."""

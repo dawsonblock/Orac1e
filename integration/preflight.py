@@ -5,28 +5,41 @@ to fail fast with a clear error instead of a cryptic ImportError later.
 """
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from pathlib import Path
 
+logger = logging.getLogger(__name__)
+
 
 def _load_system_config() -> dict:
     """Load configs/system.yaml if present; return empty dict on failure."""
+    cfg_path = Path(__file__).resolve().parents[2] / "configs" / "system.yaml"
     try:
         import yaml  # type: ignore[import]
-        cfg_path = Path(__file__).resolve().parents[2] / "configs" / "system.yaml"
+    except ImportError:
+        return {}
+    try:
         if cfg_path.exists():
             with cfg_path.open() as fh:
                 return yaml.safe_load(fh) or {}
-    except Exception:
+    except OSError:
         pass
+    except yaml.YAMLError as exc:
+        logger.warning("Failed to parse %s: %s", cfg_path, exc)
     return {}
 
 
 def _service_enabled(section: str, key: str, default: bool = True) -> bool:
     cfg = _load_system_config()
     try:
-        return bool(cfg[section][key]["enabled"])
+        value = cfg[section][key]
+        # The YAML leaf may be a plain bool (e.g. "retrieval: {enabled: true}")
+        # or a nested dict (e.g. "workers: {aider: {enabled: true}}").
+        if isinstance(value, bool):
+            return value
+        return bool(value["enabled"])
     except (KeyError, TypeError):
         return default
 

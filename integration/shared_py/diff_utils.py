@@ -10,9 +10,9 @@ _BINARY_RE = re.compile(r'^Binary files (.+) and (.+) differ$', re.MULTILINE)
 
 BLOCKED_PATH_PREFIXES = [
     ".git/",
-    ".github/workflows/",
+    ".github/",          # full .github/ tree, aligned with mutation_policy.json
     "secrets/",
-    "infra/production/",
+    "infra/",            # full infra/ tree, aligned with mutation_policy.json
     "deploy/",
 ]
 
@@ -102,8 +102,9 @@ def changed_line_count(diff_text: str) -> int:
 
 
 def enforce_path_budget(diff_text: str, allowed_prefixes: list[str]) -> list[str]:
+    # Fail-closed: if no prefixes are configured every touched file is a violation.
     if not allowed_prefixes:
-        return []
+        return extract_touched_files(diff_text)
 
     violations: list[str] = []
     normalized_prefixes = [prefix.replace('\\', '/').lstrip('./') for prefix in allowed_prefixes]

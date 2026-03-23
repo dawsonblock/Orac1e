@@ -65,7 +65,7 @@ else
   echo "Check ${log_file} for details" >&2
   # Don't fail immediately - give Oracle more time to start
   note "Retrying health check with extended timeout..."
-  if wait_for_http_ok "${ORACLE_HEALTH_URL}" 60; then
+  if wait_for_http_ok "${ORACLE_HEALTH_URL}" "${ORACLE_READY_RETRY_TIMEOUT:-60}"; then
     note "Oracle eventually became ready"
   else
     echo "Oracle failed to become ready. See ${log_file}" >&2
