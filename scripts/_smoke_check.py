@@ -184,9 +184,11 @@ try:
     pyproj = ROOT / "pyproject.toml"
     assert pyproj.exists(), "pyproject.toml missing"
     content = pyproj.read_text()
-    assert "oracle-integration" in content
+    assert "oracle-system" in content
     assert "oracle-preflight" in content
     assert "oracle-run-server" in content
+    assert '"fastapi"' in content
+    assert '"gitpython"' in content
     ok("pyproject.toml")
 except Exception as e:
     fail("pyproject.toml", e)
@@ -197,6 +199,10 @@ try:
     reqs = (ROOT / "requirements.txt").read_text()
     assert "shtab" in reqs, "shtab missing from requirements.txt"
     assert "httpx" in reqs, "httpx missing from requirements.txt"
+    assert "git+https://github.com/dawsonblock/Orac1e.git" not in reqs, "git editable installs should be local paths"
+    assert "-e third_party/code-agent-runtime" in reqs, "local code-agent-runtime editable install missing"
+    assert "-e third_party/cocoindex-code" in reqs, "local cocoindex editable install missing"
+    assert "-e ." in reqs, "local root editable install missing"
     ok("requirements.txt")
 except Exception as e:
     fail("requirements.txt", e)
@@ -214,11 +220,15 @@ except Exception as e:
 # ── 11. bootstrap_all.sh has import assertions + receipt ───────────────────
 try:
     bs = (ROOT / "scripts" / "bootstrap_all.sh").read_text()
-    assert "import aider" in bs, "import aider assertion missing"
-    assert "import cocoindex" in bs, "import cocoindex assertion missing"
-    assert "Import checks   : passed" in bs, "receipt block missing"
-    assert "Timestamp" in bs, "timestamp in receipt missing"
-    assert "smoke_simulated.sh" in bs, "smoke_simulated.sh not referenced in bootstrap"
+    assert "source .venv/bin/activate" in bs, "venv activation missing"
+    assert "pip install -r requirements.txt" in bs, "requirements install missing"
+    assert "pip install -e ." in bs, "root editable install missing"
+    assert "pip install -e third_party/aider" in bs, "aider editable install missing"
+    assert "pip install -e third_party/code-agent-runtime" in bs, "code-agent-runtime editable install missing"
+    assert "pip install -e third_party/cocoindex-code" in bs, "cocoindex editable install missing"
+    assert "Import checks passed" in bs, "import verification missing"
+    assert "PYTHONPATH" not in bs, "bootstrap should not rely on PYTHONPATH"
+    assert "requirements_bootstrap.txt" not in bs, "bootstrap should not generate requirements_bootstrap.txt"
     ok("scripts/bootstrap_all.sh")
 except Exception as e:
     fail("scripts/bootstrap_all.sh", e)

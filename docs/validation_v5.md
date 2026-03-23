@@ -3,7 +3,7 @@
 ## What was checked in this environment
 
 - `python3 -m compileall scripts integration tests`
-- `PYTHONPATH=. pytest -q tests/integration tests/e2e`
+- `pytest -q tests/integration tests/e2e`
 
 ## Result
 

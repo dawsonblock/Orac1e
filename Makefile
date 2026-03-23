@@ -1,7 +1,7 @@
 .PHONY: bootstrap start stop smoke clean harness
 
 bootstrap:
-	bash scripts/bootstrap.sh
+	bash scripts/bootstrap_all.sh
 
 start:
 	bash scripts/start_all.sh

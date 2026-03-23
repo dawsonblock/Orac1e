@@ -20,8 +20,6 @@ git commit -m "initial commit"
 cd -
 
 echo "🤖 Step 2: Triggering Simulation of Planner..."
-# Set PYTHONPATH explicitly to root to allow imports from integration.*
-export PYTHONPATH="$(pwd)"
 python3 -c "
 import sys
 import os

@@ -202,7 +202,7 @@ log "========================"
 # Step 1: Bootstrap
 if [[ $SKIP_BOOTSTRAP -eq 0 ]]; then
     log_step "Bootstrap (venv, repos, fixture)"
-    bash "${ROOT_DIR}/scripts/bootstrap.sh"
+    bash "${ROOT_DIR}/scripts/bootstrap_all.sh"
 else
     log "Skipping bootstrap"
 fi

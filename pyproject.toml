@@ -1,16 +1,21 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "oracle-integration"
+name = "oracle-system"
 version = "0.1.0"
 description = "Oracle Build v5 — integration layer and control-plane services"
 requires-python = ">=3.11"
-# Runtime deps are managed via requirements.txt; leave this empty so
-# `pip install -e .` only registers the package on sys.path without
-# pulling in transitive deps that may conflict with third-party vendored libs.
-dependencies = []
+dependencies = [
+  "fastapi",
+  "uvicorn",
+  "pydantic",
+  "pytest",
+  "redis",
+  "rq",
+  "gitpython",
+]
 
 [project.scripts]
 oracle-preflight   = "integration.preflight:check_all"

@@ -1,5 +1,5 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
 
 # Colors
 GREEN='\033[0;32m'
@@ -16,44 +16,41 @@ if [ ! -d ".venv" ]; then
 else
     echo -e "${BLUE}[bootstrap] 1/6 Reusing existsing venv...${NC}"
 fi
+source .venv/bin/activate
 
 # 2. Upgrade Pip/Core toolchain
 echo -e "${BLUE}[bootstrap] 2/6 Upgrading toolchain...${NC}"
-.venv/bin/pip install --upgrade pip setuptools wheel hatchling editables > /dev/null
+pip install --upgrade pip setuptools wheel hatchling editables > /dev/null
 
-# 3. Install core dependencies (excluding problematic git ones first)
+# 3. Install core dependencies
 echo -e "${BLUE}[bootstrap] 3/6 Installing standard requirements...${NC}"
-grep -vE "git\+https|egg=" requirements.txt > requirements_bootstrap.txt
-.venv/bin/pip install -r requirements_bootstrap.txt > /dev/null
+pip install -r requirements.txt > /dev/null
 
 # 4. Install local editable modules
 echo -e "${BLUE}[bootstrap] 4/6 Installing local modules...${NC}"
-.venv/bin/pip install -e third_party/aider > /dev/null
-.venv/bin/pip install -e third_party/cocoindex-code > /dev/null
-.venv/bin/pip install -e third_party/code-agent-runtime > /dev/null
-.venv/bin/pip install -e . > /dev/null
+pip install -e . > /dev/null
+pip install -e third_party/aider > /dev/null
+pip install -e third_party/code-agent-runtime > /dev/null
+pip install -e third_party/cocoindex-code > /dev/null
 
-# 5. Verify Aider (Installed)
-echo -e "${BLUE}[bootstrap] 5/6 Verifying aider...${NC}"
-if .venv/bin/aider --version > /dev/null 2>&1; then
-    echo -e "${GREEN}[bootstrap] Aider OK${NC}"
-else
-    echo -e "${RED}[bootstrap] Aider check failed. Installing missing deps...${NC}"
-    .venv/bin/pip install json5 pexpect pydub sounddevice soundfile analytics-python monotonic > /dev/null
-    if .venv/bin/aider --version > /dev/null 2>&1; then
-        echo -e "${GREEN}[bootstrap] Aider OK (fixed)${NC}"
-    else
-        echo -e "${RED}[bootstrap] Aider FAIL - manual intervention required${NC}"
-        .venv/bin/aider --version
-        exit 1
-    fi
-fi
+# 5. Verify imports
+echo -e "${BLUE}[bootstrap] 5/6 Verifying imports...${NC}"
+python - <<'PY'
+import importlib
+
+for module_name in ("integration", "aider", "cocoindex", "fastapi", "pydantic", "git"):
+    importlib.import_module(module_name)
+
+from apps.planner_worker import PlannerWorker
+
+print(f"{PlannerWorker.__name__} import OK")
+print("Import checks passed")
+PY
 
 # 6. Final preflight
 echo -e "${BLUE}[bootstrap] 6/6 Final preflight...${NC}"
 if [ -f "configs/system.yaml" ]; then
-    export PYTHONPATH=$PWD
-    .venv/bin/python -m integration.preflight
+    python -m integration.preflight
     echo -e "${GREEN}[bootstrap] System OK${NC}"
 else
     echo -e "${BLUE}[bootstrap] Skipping preflight (no system.yaml yet)${NC}"

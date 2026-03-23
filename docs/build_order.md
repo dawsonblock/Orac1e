@@ -5,7 +5,7 @@
 Make the workspace bootable:
 
 - `scripts/check_env.sh`
-- `scripts/bootstrap.sh`
+- `scripts/bootstrap_all.sh`
 - `scripts/start_retrieval.sh`
 - `scripts/start_workers.sh`
 - `scripts/start_oracle.sh`
