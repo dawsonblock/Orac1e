@@ -38,7 +38,9 @@ note "Building Oracle Swift package"
 note "Starting Oracle runtime; log -> ${log_file}"
 (
   cd "${oracle_root}"
-  exec swift run oracle ${ORACLE_RUN_ARGS:-}
+  # Split ORACLE_RUN_ARGS into an array so flags with spaces are handled correctly.
+  IFS=' ' read -ra _oracle_run_args <<< "${ORACLE_RUN_ARGS:-}"
+  exec swift run oracle "${_oracle_run_args[@]+"${_oracle_run_args[@]}"}"  
 ) >>"${log_file}" 2>&1 &
 oracle_pid=$!
 echo "${oracle_pid}" >"${pid_file}"

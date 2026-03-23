@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import os
@@ -65,7 +66,9 @@ def _read_json(path: Path, default: Any) -> Any:
 
 def _write_json(path: Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    tmp.replace(path)
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -183,29 +186,35 @@ def _validate_worktree_lineage(canonical_repo: Path, worktree_repo: Path) -> str
 
 def _capture_environment(repo: Path) -> dict[str, str]:
     """Capture environment information for equivalence checking using SHA-256."""
-    import hashlib
-    
     env = {}
-    
-    # Capture Python version
-    proc = subprocess.run(
-        ["python", "--version"],
-        cwd=repo,
-        text=True,
-        capture_output=True,
-    )
-    if proc.returncode == 0:
-        env["python_version"] = proc.stdout.strip()
-    
+
+    # Use python3 explicitly; add timeout to avoid hanging on slow systems.
+    try:
+        proc = subprocess.run(
+            ["python3", "--version"],
+            cwd=repo,
+            text=True,
+            capture_output=True,
+            timeout=5,
+        )
+        if proc.returncode == 0:
+            env["python_version"] = proc.stdout.strip() or proc.stderr.strip()
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+
     # Capture Node version if available
-    proc = subprocess.run(
-        ["node", "--version"],
-        cwd=repo,
-        text=True,
-        capture_output=True,
-    )
-    if proc.returncode == 0:
-        env["node_version"] = proc.stdout.strip()
+    try:
+        proc = subprocess.run(
+            ["node", "--version"],
+            cwd=repo,
+            text=True,
+            capture_output=True,
+            timeout=5,
+        )
+        if proc.returncode == 0:
+            env["node_version"] = proc.stdout.strip()
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
     
     # Capture key dependency hashes using SHA-256
     lock_files = [
@@ -244,13 +253,15 @@ def _environments_match(env1: dict[str, str], env2: dict[str, str]) -> bool:
 
 
 def _run_validation(repo: Path, commands: list[str]) -> dict[str, Any]:
+    # Capture once; reused across all return paths to avoid redundant subprocess spawns.
+    environment = _capture_environment(repo)
     if not commands:
         return {
             "ok": False,
             "steps": [],
-            "environment": _capture_environment(repo),
+            "environment": environment,
             "error_category": "validation_unconfigured",
-            "summary": "Validation configuration missing - no validation commands configured"
+            "summary": "Validation configuration missing - no validation commands configured",
         }
     steps: list[dict[str, Any]] = []
     for command in commands:
@@ -259,6 +270,7 @@ def _run_validation(repo: Path, commands: list[str]) -> dict[str, Any]:
             cwd=repo,
             text=True,
             capture_output=True,
+            timeout=300,
         )
         step = {
             "name": command,
@@ -269,8 +281,8 @@ def _run_validation(repo: Path, commands: list[str]) -> dict[str, Any]:
         }
         steps.append(step)
         if proc.returncode != 0:
-            return {"ok": False, "steps": steps, "environment": _capture_environment(repo)}
-    return {"ok": True, "steps": steps, "environment": _capture_environment(repo)}
+            return {"ok": False, "steps": steps, "environment": environment}
+    return {"ok": True, "steps": steps, "environment": environment}
 
 
 def _write_validation_artifact(run_id: str, validation: dict[str, Any], kind: str) -> str:
@@ -544,7 +556,7 @@ def promote_run(
         }
         _record_promotion(run_id, receipt)
         _record_event(run_id, "promotion.failed", receipt)
-        raise PromotionError(str(exc))
+        raise PromotionError(str(exc)) from exc
 
 
 def reject_run(run_id: str, actor: str = "operator", note: str = "") -> dict[str, Any]:
