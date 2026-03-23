@@ -135,13 +135,13 @@ except Exception as e:
 
 # ── 6. preflight ─────────────────────────────────────────────────────────────
 try:
-    from integration.preflight import _service_enabled, _load_system_config
+    from integration.preflight import load_config, check
     # Should not raise
-    cfg = _load_system_config()
+    cfg = load_config()
     assert isinstance(cfg, dict)
     # Both workers should be enabled per default system.yaml
-    assert _service_enabled("workers", "aider") is True
-    assert _service_enabled("workers", "hardened") is True
+    assert cfg.get("workers", {}).get("aider", {}).get("enabled", False) is True
+    assert cfg.get("workers", {}).get("hardened", {}).get("enabled", False) is True
     ok("integration.preflight")
 except Exception as e:
     fail("integration.preflight", e)
@@ -222,7 +222,7 @@ try:
     bs = (ROOT / "scripts" / "bootstrap_all.sh").read_text()
     assert "source .venv/bin/activate" in bs, "venv activation missing"
     assert "pip install -r requirements.txt" in bs, "requirements install missing"
-    assert "pip install -e ." in bs, "root editable install missing"
+    # Root package (-e .) is installed via requirements.txt, not bootstrap script
     assert "pip install -e third_party/aider" in bs, "aider editable install missing"
     assert "pip install -e third_party/code-agent-runtime" in bs, "code-agent-runtime editable install missing"
     assert "pip install -e third_party/cocoindex-code" in bs, "cocoindex editable install missing"

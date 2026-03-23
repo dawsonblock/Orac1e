@@ -12,6 +12,12 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-# Insert at position 0 so project-local modules always win over installed ones
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+VENDORED_PATHS = [
+    ROOT,
+    ROOT / "third_party" / "code-agent-runtime",
+    ROOT / "third_party" / "cocoindex-code" / "src",
+]
+
+for path in reversed(VENDORED_PATHS):
+    if path.exists() and str(path) not in sys.path:
+        sys.path.insert(0, str(path))

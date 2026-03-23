@@ -1,10 +1,9 @@
 """End-to-end test for the full execution pipeline."""
 
-import pytest
 from integration.pipeline import run_pipeline
 
 
-def test_full_pipeline(tmp_path):
+def test_full_pipeline(tmp_path, monkeypatch):
     """
     Test the full pipeline: task → worker → patch → validation → apply.
 
@@ -29,6 +28,20 @@ def test_full_pipeline(tmp_path):
         "    assert first_token([1, 2, 3]) == 1\n"
     )
 
+    def fake_create_plan(task, context):
+        return {
+            "edits": [
+                {
+                    "file": "parser.py",
+                    "search": "def first_token(tokens):\n    return tokens[0]\n",
+                    "replace": "def first_token(tokens):\n    if not tokens:\n        return None\n    return tokens[0]\n"
+                }
+            ]
+        }
+
+    monkeypatch.setattr("integration.pipeline.create_plan", fake_create_plan)
+    monkeypatch.setattr("integration.pipeline.analyze_failure", lambda task, error_output, context: None)
+
     # Run the pipeline
     result = run_pipeline(
         "fix first_token so empty list returns None",
@@ -41,4 +54,4 @@ def test_full_pipeline(tmp_path):
 
     # Verify the fix was actually applied
     parser_content = (repo / "parser.py").read_text()
-    assert "if not tokens" in parser_content or "return None" in parser_content
+    assert "if not tokens:" in parser_content and "return None" in parser_content

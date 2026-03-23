@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-import tomllib
+import sys
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    import tomli as tomllib
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -43,8 +48,8 @@ def test_bootstrap_installs_editables_without_pythonpath_hacks() -> None:
     assert "pip install -r requirements.txt" in bootstrap
     assert "pip install -e third_party/aider" in bootstrap
     assert "pip install -e ." not in bootstrap
-    assert "pip install -e third_party/code-agent-runtime" not in bootstrap
-    assert "pip install -e third_party/cocoindex-code" not in bootstrap
+    assert "pip install -e third_party/code-agent-runtime" in bootstrap
+    assert "pip install -e third_party/cocoindex-code" in bootstrap
     assert "python - <<'PY'" in bootstrap
     assert "Import checks passed" in bootstrap
     assert "PYTHONPATH" not in bootstrap

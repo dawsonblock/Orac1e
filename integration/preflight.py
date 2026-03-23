@@ -12,19 +12,19 @@ def check():
     cfg = load_config()
     missing = []
 
-    if cfg["workers"]["aider"]["enabled"]:
+    if cfg.get("workers", {}).get("aider", {}).get("enabled", False):
         try:
             import aider
         except Exception:
             missing.append("aider")
 
-    if cfg["workers"]["hardened"]["enabled"]:
+    if cfg.get("workers", {}).get("hardened", {}).get("enabled", False):
         try:
             from apps.planner_worker import PlannerWorker
         except Exception:
             missing.append("code-agent-runtime")
 
-    if cfg["retrieval"]["broker"]["enabled"]:
+    if cfg.get("retrieval", {}).get("broker", {}).get("enabled", False):
         try:
             import cocoindex_code
         except Exception:
@@ -35,4 +35,8 @@ def check():
 
 def check_all():
     """Compatibility wrapper for legacy calls (from bootstrap or service startup)."""
+    check()
+
+
+if __name__ == "__main__":
     check()

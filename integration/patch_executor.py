@@ -6,6 +6,35 @@ from pathlib import Path
 from typing import Dict, Any, List
 
 
+def _write_text_atomic(full_path: Path, content: str) -> None:
+    temp_fd, temp_path = tempfile.mkstemp(
+        dir=full_path.parent,
+        prefix=f".{full_path.name}.tmp"
+    )
+    try:
+        with os.fdopen(temp_fd, "w", encoding="utf-8") as f:
+            f.write(content)
+        os.replace(temp_path, full_path)
+    except Exception:
+        try:
+            os.unlink(temp_path)
+        except OSError:
+            pass
+        raise
+
+
+def _rollback_changes(repo_path: Path, applied_files: List[str], original_contents: Dict[str, str]) -> None:
+    restored = set()
+    for file_path in reversed(applied_files):
+        if file_path in restored or file_path not in original_contents:
+            continue
+        try:
+            _write_text_atomic(repo_path / file_path, original_contents[file_path])
+            restored.add(file_path)
+        except Exception:
+            pass  # Continue trying to restore other files
+
+
 def apply_plan(plan: Dict[str, Any], repo: str) -> Dict[str, Any]:
     """
     Apply an edit plan to the repository.
@@ -24,6 +53,15 @@ def apply_plan(plan: Dict[str, Any], repo: str) -> Dict[str, Any]:
         return {"success": False, "error": "No edits in plan"}
 
     applied_files = []
+    original_contents: Dict[str, str] = {}
+
+    def fail(error: str) -> Dict[str, Any]:
+        if applied_files:
+            try:
+                _rollback_changes(repo_path, applied_files, original_contents)
+            except Exception as rollback_error:
+                return {"success": False, "error": f"{error}; rollback failed: {rollback_error}"}
+        return {"success": False, "error": error}
 
     for edit in edits:
         file_path = edit.get("file", "")
@@ -31,7 +69,7 @@ def apply_plan(plan: Dict[str, Any], repo: str) -> Dict[str, Any]:
         replace = edit.get("replace", "")
 
         if not file_path or not search:
-            return {"success": False, "error": f"Invalid edit: missing file or search"}
+            return fail(f"Invalid edit: missing file or search")
 
         full_path = repo_path / file_path
 
@@ -41,45 +79,33 @@ def apply_plan(plan: Dict[str, Any], repo: str) -> Dict[str, Any]:
             repo_resolved = repo_path.resolve()
             resolved.relative_to(repo_resolved)
         except ValueError:
-            return {"success": False, "error": f"File outside repo: {file_path}"}
+            return fail(f"File outside repo: {file_path}")
 
         if not full_path.exists():
-            return {"success": False, "error": f"File not found: {file_path}"}
+            return fail(f"File not found: {file_path}")
 
         try:
             content = full_path.read_text(encoding='utf-8')
         except (OSError, UnicodeDecodeError) as e:
-            return {"success": False, "error": f"Cannot read {file_path}: {e}"}
+            return fail(f"Cannot read {file_path}: {e}")
+
+        if file_path not in original_contents:
+            original_contents[file_path] = content
 
         # Verify search exists
         if search not in content:
-            return {"success": False, "error": f"Search text not found in {file_path}"}
+            return fail(f"Search text not found in {file_path}")
 
         # Apply replacement
         new_content = content.replace(search, replace, 1)
 
         if new_content == content:
-            return {"success": False, "error": f"No change made to {file_path}"}
+            return fail(f"No change made to {file_path}")
 
-        # Write atomically: create temp file in same directory, then rename
         try:
-            temp_fd, temp_path = tempfile.mkstemp(
-                dir=full_path.parent,
-                prefix=f".{full_path.name}.tmp"
-            )
-            try:
-                with os.fdopen(temp_fd, 'w', encoding='utf-8') as f:
-                    f.write(new_content)
-                os.replace(temp_path, full_path)
-                applied_files.append(file_path)
-            except Exception:
-                # Clean up temp file if rename failed
-                try:
-                    os.unlink(temp_path)
-                except OSError:
-                    pass
-                raise
+            _write_text_atomic(full_path, new_content)
+            applied_files.append(file_path)
         except OSError as e:
-            return {"success": False, "error": f"Cannot write {file_path}: {e}"}
+            return fail(f"Cannot write {file_path}: {e}")
 
     return {"success": True, "files": applied_files}
