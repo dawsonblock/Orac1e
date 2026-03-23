@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def test_root_pyproject_declares_bootstrap_dependencies() -> None:
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    dependencies = set(pyproject["project"]["dependencies"])
+    pyproject_dependencies = set(pyproject["project"]["dependencies"])
 
     assert pyproject["project"]["name"] == "oracle-system"
     assert pyproject["build-system"]["build-backend"] == "setuptools.build_meta"
@@ -22,7 +22,7 @@ def test_root_pyproject_declares_bootstrap_dependencies() -> None:
         "redis",
         "rq",
         "gitpython",
-    }.issubset(dependencies)
+    }.issubset(pyproject_dependencies)
 
 
 def test_requirements_use_local_editable_installs() -> None:
