@@ -379,10 +379,17 @@ class TestPromotionErrorHandling:
 
     def test_promotion_with_worktree_lineage_mismatch(self, promotion_env):
         """Test promotion refuses worktree with mismatched lineage."""
-        # Reset canonical to create lineage mismatch
+        # Advance canonical HEAD after the worktree was branched, creating a lineage mismatch
+        (promotion_env["canonical"] / "extra.py").write_text("# extra\n", encoding="utf-8")
         subprocess.run(
-            ["git", "-C", str(promotion_env["canonical"]), "reset", "--hard", "HEAD~1"],
+            ["git", "-C", str(promotion_env["canonical"]), "add", "extra.py"],
             check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(promotion_env["canonical"]), "commit", "-m", "advance canonical"],
+            check=True,
+            capture_output=True,
         )
 
         (promotion_env["worktree"] / "app.py").write_text("print('update')\n", encoding="utf-8")

@@ -1,4 +1,3 @@
-aider-chat==0.0.0
 aiohappyeyeballs==2.6.1
 aiohttp==3.13.3
 aiosignal==1.4.0
@@ -11,7 +10,7 @@ cffi==2.0.0
 charset-normalizer==3.4.6
 click==8.3.1
 cocoindex==1.0.0a26
--e git+https://github.com/dawsonblock/Orac1e.git@15ae26ad1adabe6ce845b25022d5d9e2fe151cbe#egg=cocoindex_code&subdirectory=third_party/cocoindex-code
+-e git+https://github.com/dawsonblock/Orac1e.git@60bb05c04904a0ae33214755e74f1131a7197288#egg=cocoindex_code&subdirectory=third_party/cocoindex-code
 code-agent-runtime==0.7.0
 cryptography==46.0.5
 distro==1.9.0

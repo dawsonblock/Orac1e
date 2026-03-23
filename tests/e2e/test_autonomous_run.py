@@ -109,18 +109,18 @@ class TestAutonomousRunErrorScenarios:
 
     def test_reject_run_with_invalid_status_raises(self, promotion_env):
         """Test that rejecting a run with invalid status raises error."""
-        # Update run status to something invalid
+        # Update run status to something that cannot be rejected
         runs = json.loads(
             (promotion_env["runs_root"] / "runs.json").read_text(encoding="utf-8")
         )
-        runs[0]["status"] = "running"  # Valid status
+        runs[0]["status"] = "running"  # Cannot reject a run that is still running
         (promotion_env["runs_root"] / "runs.json").write_text(
             json.dumps(runs, indent=2), encoding="utf-8"
         )
 
-        # Should succeed for running status
-        result = crp.reject_run(promotion_env["run_id"], actor="tester", note="test")
-        assert result["decision"] == "rejected"
+        # Should raise because running is not a rejectable status
+        with pytest.raises(crp.PromotionError, match="not awaiting approval"):
+            crp.reject_run(promotion_env["run_id"], actor="tester", note="test")
 
 
 class TestAutonomousRunApproval:

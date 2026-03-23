@@ -177,7 +177,7 @@ def _validate_worktree_lineage(canonical_repo: Path, worktree_repo: Path) -> str
     canonical_head = _git(canonical_repo, "rev-parse", "HEAD")
     worktree_head = _git(worktree_repo, "rev-parse", "HEAD")
     if canonical_head != worktree_head:
-        raise PromotionError("worktree base no longer matches canonical repo HEAD; refusing promotion")
+        raise PromotionError("worktree lineage mismatch: base commit no longer matches canonical HEAD; refusing promotion")
     return canonical_head
 
 
@@ -418,6 +418,8 @@ def promote_run(
         pre_validation = _run_validation(worktree_repo, commands_to_run)
         _write_validation_artifact(run_id, pre_validation, "worktree")
         if not pre_validation["ok"]:
+            run["status"] = "failed"
+            _replace_run(run)
             raise PromotionError("worktree validation failed before promotion")
 
     base_commit = _validate_worktree_lineage(canonical_repo, worktree_repo)
@@ -434,7 +436,8 @@ def promote_run(
         canonical_env = _capture_environment(canonical_repo)
         explicit_skip_requested = allow_skip_canonical_validation or os.environ.get("ORACLE_ALLOW_SKIP_CANONICAL_VALIDATION") == "1"
         environments_match = pre_validation["ok"] and _environments_match(worktree_env, canonical_env)
-        should_skip_canonical = explicit_skip_requested and environments_match
+        no_validation_skipped = not has_validation and allow_no_validation
+        should_skip_canonical = (explicit_skip_requested and environments_match) or no_validation_skipped
         canonical_validation_ran = not should_skip_canonical
         canonical_validation_skip_reason = None
 
@@ -442,10 +445,13 @@ def promote_run(
         patch_applied = True
 
         if should_skip_canonical:
-            canonical_validation_skip_reason = "explicit_override_with_matching_environments"
+            canonical_validation_skip_reason = (
+                "allow_no_validation" if no_validation_skipped
+                else "explicit_override_with_matching_environments"
+            )
             logger.warning(
                 f"Canonical validation skipped for run {run_id}: "
-                f"explicit override enabled and worktree environment matches canonical environment."
+                f"{'allow_no_validation flag set' if no_validation_skipped else 'explicit override enabled and worktree environment matches canonical environment'}."
             )
             post_validation = {
                 "ok": pre_validation["ok"],

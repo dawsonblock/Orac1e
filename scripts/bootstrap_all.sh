@@ -73,6 +73,13 @@ log "3/6  Installing root requirements"
 
 # ── Step 4: install third-party packages in editable mode ────────────────────
 log "4/6  Installing third-party packages (editable)"
+# Purge any stale egg-info / dist-info left by previous failed installs.
+# Without this, pip's resolver sees those registrations in every Python
+# environment on the machine (they leak out of the venv via PYTHONPATH).
+find "${ROOT}/third_party" \
+    \( -name "*.egg-info" -o -name "*.dist-info" \) \
+    -maxdepth 4 -type d \
+    -exec rm -rf {} + 2>/dev/null || true
 # Vendored packages live in third_party/ which has no per-package .git history.
 # setuptools-scm / hatch-vcs detect the *parent* repo root but can't infer an
 # individual package version. Pin a pretend version so the build succeeds.
