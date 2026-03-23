@@ -1,18 +1,27 @@
 import logging
+import os
 from typing import Dict, Any
 from integration.worker_hardened.bridge import run_hardened
 from integration.shared_py.models import ProposeRequest
+from integration.shared_py.production_utils import setup_production_logging, CircuitBreaker
+
+# Standardized production logging
+if os.environ.get("PRODUCTION") == "true":
+    setup_production_logging()
+else:
+    logging.basicConfig(level=logging.INFO)
 
 logger = logging.getLogger(__name__)
-
+planner_breaker = CircuitBreaker(failure_threshold=3)
 
 def coding_planner_execute(task: str, repo_path: str) -> Dict[str, Any]:
     """
     Supervised Coding Planner that acts as a reliability layer.
-
-    1. Attempts hardened/deterministic fix logic for known patterns.
-    2. Returns a standardized proposal block.
     """
+    if not planner_breaker.can_execute():
+        logger.error("Circuit breaker is OPEN. Fast-failing task.")
+        return {"success": False, "error": "CIRCUIT_BREAKER_OPEN"}
+
     logger.info(f"Planner starting execution for task: {task}")
 
     # Enforce P0 #3: Use ProposeRequest for internal normalization
@@ -24,7 +33,7 @@ def coding_planner_execute(task: str, repo_path: str) -> Dict[str, Any]:
         task=task,
         mode="autonomous",
         context=ProposeContext(),
-        constraints=Constraints()
+        constraints=Constraints(allowed_paths=[""])
     )
 
     # 1. Execute hardened worker (bridge to heuristic + autonomous paths)
@@ -38,8 +47,14 @@ def coding_planner_execute(task: str, repo_path: str) -> Dict[str, Any]:
             os.environ["CODE_AGENT_REPO_PATH"] = os.path.abspath(rt_path)
 
         result = run_hardened(req)
+        # Success at worker level doesn't mean patch was produced
+        if not result.get("patch"):
+             planner_breaker.record_failure()
+        else:
+             planner_breaker.record_success()
     except Exception as e:
         logger.error(f"Worker execution failed: {e}")
+        planner_breaker.record_failure()
         return {
             "success": False,
             "error": "WORKER_FATAL",
