@@ -8,7 +8,7 @@ Run:
 scripts/bootstrap_all.sh
 ```
 
-This creates three virtual environments under `workspace/venvs/`, installs the adapter dependencies, creates the fixture repo, and refreshes the web tool registry.
+This creates a single Python virtual environment in `.venv` at the repository root, installs the adapter dependencies, creates the fixture repo, and refreshes the web tool registry.
 
 If your default `python3` is not 3.11 or 3.12, point the bootstrap at a supported interpreter first:
 
