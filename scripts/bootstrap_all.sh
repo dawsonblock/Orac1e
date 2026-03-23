@@ -29,17 +29,17 @@ pip install -r requirements.txt > /dev/null
 # 4. Install local editable modules
 echo -e "${BLUE}[bootstrap] 4/6 Installing local modules...${NC}"
 pip install -e third_party/aider > /dev/null
+pip install -e third_party/code-agent-runtime > /dev/null
+pip install -e third_party/cocoindex-code > /dev/null
+
 # 5. Verify imports
 echo -e "${BLUE}[bootstrap] 5/6 Verifying imports...${NC}"
 python - <<'PY'
 import importlib
 
-for module_name in ("integration", "aider", "cocoindex", "fastapi", "pydantic", "git"):
+for module_name in ("integration", "aider", "cocoindex_code", "fastapi", "pydantic", "git"):
     importlib.import_module(module_name)
 
-from apps.planner_worker import PlannerWorker
-
-print(f"{PlannerWorker.__name__} import OK")
 print("Import checks passed")
 PY
 

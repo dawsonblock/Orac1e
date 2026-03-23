@@ -26,9 +26,9 @@ def check():
 
     if cfg["retrieval"]["broker"]["enabled"]:
         try:
-            import cocoindex
+            import cocoindex_code
         except Exception:
-            missing.append("cocoindex")
+            missing.append("cocoindex-code")
 
     if missing:
         raise RuntimeError(f"Missing dependencies: {missing}. Run scripts/bootstrap_all.sh")
