@@ -12,7 +12,7 @@ If bootstrap fails on Python version:
 If workers are unhealthy:
 - check adapter ports in `configs/ports.env`
 - inspect `workspace/logs/`
-- confirm `workspace/venvs/` exists and was created by `scripts/bootstrap.sh`
+- confirm `.venv/` exists and was created by `scripts/bootstrap_all.sh`
 
 If apply fails:
 - inspect `workspace/artifacts/<run_id>/proposal.diff`

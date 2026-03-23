@@ -43,7 +43,6 @@ LOG_DIR="${ROOT}/workspace/logs"
 PID_DIR="${ROOT}/workspace/pids"
 mkdir -p "${LOG_DIR}" "${PID_DIR}"
 
-export PYTHONPATH="${ROOT}:${ROOT}/third_party/code-agent-runtime:${PYTHONPATH:-}"
 export CODE_AGENT_REPO_PATH="${ROOT}/third_party/code-agent-runtime"
 
 log() { echo "[run_local] $*"; }

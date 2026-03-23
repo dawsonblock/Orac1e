@@ -4,7 +4,6 @@ set -e
 # Tests the ParallelOrchestrator by running multiple tasks in parallel
 
 source .venv/bin/activate
-export PYTHONPATH="$(pwd)"
 
 # Setup independent fixture repos
 REPO_A="$(pwd)/workspace/fixtures/parallel_a"
