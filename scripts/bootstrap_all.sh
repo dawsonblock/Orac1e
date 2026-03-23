@@ -114,6 +114,25 @@ done
 # that conflict with our services. PYTHONPATH (set in step 5) provides import.
 log "     SKIP aider pip-install (PYTHONPATH-only; avoids resolver conflicts)"
 
+# Install the root oracle-integration package so scripts.* and integration.*
+# are importable without manual PYTHONPATH entries.
+log "     pip install -e . (oracle-integration root package)"
+"${PIP}" install -e "${ROOT}" --quiet 2>&1 || {
+    log "     WARNING: root editable install failed — continuing (PYTHONPATH covers it)"
+}
+
+# ── Step 4b: import assertions — fail fast if any critical module is broken ──
+log "4b/6 Verifying critical imports"
+"${PYTHON}" -c "
+import aider                                          # aider CLI core
+import cocoindex                                      # cocoindex semantic search
+from integration.preflight import check_all           # oracle preflight
+from scripts.coding_run_promotion import PromotionError  # promotion engine
+print('  import assertions: OK')
+" || die "Import assertions failed — see messages above"
+"${PYTHON}" -m aider.main --help >/dev/null 2>&1 || die "aider.main --help failed — aider installation is broken"
+log "     Import assertions passed"
+
 # ── Step 5: add PYTHONPATH for runtime that uses sys.path injection ───────────
 # Always include src/ layouts; makes imports work even if pip install failed.
 export PYTHONPATH="${ROOT}:${ROOT}/third_party/code-agent-runtime:${ROOT}/third_party/cocoindex-code/src:${ROOT}/third_party/aider:${PYTHONPATH:-}"
@@ -136,6 +155,12 @@ echo "╔═══════════════════════�
 echo "║          BOOTSTRAP COMPLETE ✓                 ║"
 echo "╚══════════════════════════════════════════════╝"
 echo ""
+echo "  Python          : ${PYTHON_BIN}"
+echo "  Python version  : $(${PYTHON_BIN} --version 2>&1)"
+echo "  Packages        : aider (PYTHONPATH), code-agent-runtime (editable), cocoindex-code (editable), oracle-integration (editable)"
+echo "  Import checks   : passed"
+echo "  Timestamp       : $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+echo ""
 echo "  Activate venv : source .venv/bin/activate"
 echo "  Start system  : bash scripts/run_local.sh"
-echo "  Full e2e      : bash scripts/smoke_e2e.sh"
+echo "  Full e2e      : bash scripts/smoke_simulated.sh"

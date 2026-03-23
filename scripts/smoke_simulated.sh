@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# smoke_e2e.sh - End-to-end smoke test with full operator loop
+# smoke_simulated.sh - Simulated end-to-end smoke test (services must be pre-running)
 #
 # This script performs a complete end-to-end test of the Oracle coding system:
 # 1. Bootstrap services (venv, repos)

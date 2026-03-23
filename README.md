@@ -3,8 +3,8 @@
 > **Supervised Local Coding Runtime** — An authority-controlled coding platform where every change is retrieved, routed, validated, and held for explicit operator approval before touching a canonical repository.
 
 [![Status](https://img.shields.io/badge/status-active-green?style=flat-square)](docs/build_status.md)
+[![Python](https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13-3776AB?style=flat-square&logo=python&logoColor=white)](integration/)
 [![Swift](https://img.shields.io/badge/Swift-5.9+-F05138?style=flat-square&logo=swift&logoColor=white)](third_party/oracle-os)
-[![Python](https://img.shields.io/badge/Python-3.11%20%7C%203.12-3776AB?style=flat-square&logo=python&logoColor=white)](integration/)
 [![Platform](https://img.shields.io/badge/platform-macOS-000000?style=flat-square&logo=apple&logoColor=white)]()
 [![License](https://img.shields.io/badge/license-see%20LICENSE-blue?style=flat-square)](LICENSE)
 
@@ -12,15 +12,33 @@
 
 ## ✨ Features
 
-| Feature | Description |
-|---------|-------------|
-| **Authority Control** | Oracle OS is the sole canonical worktree owner — workers never write directly to canonical repos |
-| **Dual Worker Support** | Interactive Aider worker + bounded autonomous hardened worker |
-| **Code Retrieval** | cocoindex-powered semantic code search with retrieval broker |
-| **Validation Pipeline** | Multi-stage validation: preflight → lint → targeted tests → full tests (optimized with caching & parallel execution) |
-| **Operator Approval** | Every patch awaits explicit approve/reject before apply |
-| **Tool Registry** | Manifest-driven tool discovery with health monitoring |
-| **SwiftUI Controller** | macOS native UI for managing coding runs |
+| Feature | Status | Description |
+|---------|--------|-------------|
+| **Authority Control** | ✅ Production | Oracle run-server is the sole canonical worktree owner — workers never write directly to canonical repos |
+| **Dual Worker Support** | ✅ Production | Interactive Aider worker + bounded autonomous hardened worker |
+| **Code Retrieval** | ✅ Production | cocoindex-powered semantic code search with retrieval broker |
+| **Validation Pipeline** | ✅ Production | Multi-stage validation: preflight → worktree → canonical (with profile-based configuration) |
+| **Operator Approval** | ✅ Production | Every patch awaits explicit approve/reject before apply; state machine enforced |
+| **Promotion Receipts** | ✅ Production | Full audit trail: state_before/after, patch stats, approval block, validation results |
+| **Tool Registry** | ✅ Production | Manifest-driven tool discovery with health monitoring |
+| **SwiftUI Controller** | 🧪 Experimental | macOS native UI in `third_party/oracle-os` — optional; Python control plane works standalone |
+
+---
+
+## 🚀 Quick Start
+
+```bash
+# 1. Bootstrap (one-time, idempotent)
+bash scripts/bootstrap_all.sh
+
+# 2. Start all services (reads configs/system.yaml to decide which to run)
+bash scripts/run_local.sh
+
+# 3. Simulated smoke test (requires services running)
+bash scripts/smoke_simulated.sh
+```
+
+> **Note**: `smoke_simulated.sh` makes real HTTP calls to `/propose` but requires all services to be pre-started via `run_local.sh`. It is **not** a true cold-start test.
 
 ---
 
@@ -121,31 +139,29 @@ User Request
 
 ### Run Lifecycle
 
-| State | Description |
-|-------|-------------|
-| `created` | Run initialized, awaiting processing |
-| `retrieving` | Fetching relevant code context |
-| `proposing` | Worker generating patch proposal |
-| `validating` | Running validation pipeline |
-| `awaiting_approval` | Waiting for operator decision |
-| `approved` | Operator approved the patch |
-| `rejected` | Operator rejected the patch |
-| `applied` | Patch merged to canonical (on approval) |
+| State | Terminal | Description |
+|-------|----------|-------------|
+| `created` | | Run initialized, awaiting processing |
+| `retrieving` | | Fetching relevant code context |
+| `proposing` | | Worker generating patch proposal |
+| `validating` | | Running validation pipeline |
+| `awaiting_approval` | | Waiting for operator decision |
+| `applied` | ✅ | Patch merged to canonical (on approval) |
+| `rejected` | ✅ | Operator rejected the patch |
+| `failed` | ✅ | Error during processing or validation |
 
 ---
 
-## 🚀 Quick Start
+## � Full Setup Guide
 
 ### Prerequisites
 
-- **macOS** with Xcode / Swift 5.9+
-- **Python 3.11 or 3.12** (3.13+ not yet validated)
+- **macOS** (Linux also works for the Python services; Swift controller requires macOS)
+- **Python 3.11, 3.12, or 3.13** — `bootstrap_all.sh` auto-selects the newest available
 - Git
 
-> **Python Version Control:** To use a specific Python interpreter:
-> ```bash
-> export ORACLE_PYTHON_BIN=python3.12
-> ```
+> **Python Version Control:** Pin a specific interpreter:  
+> `export ORACLE_PYTHON_BIN=python3.12`
 
 ### Setup & Launch
 
@@ -153,17 +169,17 @@ User Request
 # Step 1: Validate environment
 ./scripts/check_env.sh
 
-# Step 2: Bootstrap virtual envs, fixture repo, and tool registry
-./scripts/bootstrap.sh
+# Step 2: Bootstrap single shared .venv, editable installs, import checks
+./scripts/bootstrap_all.sh
 
-# Step 3: Start all services (retrieval → workers → Oracle)
-./scripts/start_all.sh
+# Step 3: Start all services (respects configs/system.yaml)
+./scripts/run_local.sh
 
 # Step 4: Quick smoke test (service health checks)
 ./scripts/smoke_test.sh
 
-# Step 5: Full E2E smoke test (complete operator loop)
-./scripts/smoke_e2e.sh
+# Step 5: Simulated E2E smoke test (requires services running)
+./scripts/smoke_simulated.sh
 
 # Step 6: Use the CLI
 oracle coding help

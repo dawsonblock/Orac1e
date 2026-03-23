@@ -12,6 +12,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from integration.lifecycle import transition
+
 logger = logging.getLogger(__name__)
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -259,6 +261,27 @@ def _environments_match(env1: dict[str, str], env2: dict[str, str]) -> bool:
     return True
 
 
+def _capture_patch_stats(patch_file: Path) -> tuple[list[str], int, int]:
+    """Parse a unified-diff file and return (changed_files, lines_added, lines_removed).
+
+    Returns ([], 0, 0) when the file is absent or empty.
+    """
+    if not patch_file.exists():
+        return [], 0, 0
+    text = patch_file.read_text(encoding="utf-8", errors="replace")
+    changed_files: list[str] = []
+    lines_added = 0
+    lines_removed = 0
+    for line in text.splitlines():
+        if line.startswith("+++ b/"):
+            changed_files.append(line[6:])
+        elif line.startswith("+") and not line.startswith("+++"):
+            lines_added += 1
+        elif line.startswith("-") and not line.startswith("---"):
+            lines_removed += 1
+    return changed_files, lines_added, lines_removed
+
+
 def _run_validation(repo: Path, commands: list[str]) -> dict[str, Any]:
     # Capture once; reused across all return paths to avoid redundant subprocess spawns.
     environment = _capture_environment(repo)
@@ -449,7 +472,7 @@ def promote_run(
         pre_validation = _run_validation(worktree_repo, commands_to_run)
         _write_validation_artifact(run_id, pre_validation, "worktree")
         if not pre_validation["ok"]:
-            run["status"] = "failed"
+            transition(run, "failed")
             _replace_run(run)
             raise PromotionError("worktree validation failed before promotion")
 
@@ -507,8 +530,9 @@ def promote_run(
         approval = _record_approval(run_id, "approved", actor, note)
         _record_event(run_id, "approval.recorded", approval)
 
-        run["status"] = "applied"
+        transition(run, "applied")
         _replace_run(run)
+        patch_files_changed, patch_lines_added, patch_lines_removed = _capture_patch_stats(patch_file)
         receipt = {
             "run_id": run_id,
             "actor": actor,
@@ -519,8 +543,22 @@ def promote_run(
             "canonical_repo": str(canonical_repo),
             "worktree_repo": str(worktree_repo),
             "status": "applied",
+            "state_before": "awaiting_approval",
+            "state_after": "applied",
             "validation_ok": True,
             "patch_file": str(patch_file),
+            "patch": {
+                "exists": patch_file.exists(),
+                "files_changed": len(patch_files_changed),
+                "file_list": patch_files_changed,
+                "lines_added": patch_lines_added,
+                "lines_removed": patch_lines_removed,
+            },
+            "approval": {
+                "recorded": True,
+                "actor": actor,
+                "timestamp": approval.get("at"),
+            },
             "canonical_validation_ran": canonical_validation_ran,
             "canonical_validation_skip_reason": canonical_validation_skip_reason,
             "validation_profile_name": validation_profile_name,
@@ -555,7 +593,8 @@ def promote_run(
     except Exception as exc:
         should_rollback = pre_status_clean and patch_applied
         _rollback_canonical(canonical_repo, should_rollback)
-        run["status"] = "failed"
+        _state_before_failure = run.get("status") or "awaiting_approval"
+        transition(run, "failed")
         _replace_run(run)
         _pre = locals().get("pre_validation") or {}
         receipt = {
@@ -567,6 +606,8 @@ def promote_run(
             "canonical_repo": str(canonical_repo),
             "worktree_repo": str(worktree_repo),
             "status": "failed",
+            "state_before": _state_before_failure,
+            "state_after": "failed",
             "validation_ok": False,
             "error": str(exc),
             "canonical_validation_ran": canonical_validation_ran,
@@ -601,7 +642,7 @@ def reject_run(run_id: str, actor: str = "operator", note: str = "") -> dict[str
         raise PromotionError(f"run {run_id} is not awaiting approval (current status: {current_status})")
 
     approval = _record_approval(run_id, "rejected", actor, note)
-    run["status"] = "rejected"
+    transition(run, "rejected")
     _replace_run(run)
     _record_event(run_id, "approval.rejected", approval)
     return approval

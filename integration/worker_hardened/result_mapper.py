@@ -13,7 +13,7 @@ def _commands_from_notes(notes: list[str]) -> list[str]:
     return commands
 
 
-def to_response(patch, report, trace, patch_message: str | None) -> dict:
+def to_response(patch, report, trace, patch_message: str | None, *, failure_reason: str | None = None) -> dict:
     warnings: list[str] = []
     if patch_message:
         warnings.append(patch_message)
@@ -25,6 +25,7 @@ def to_response(patch, report, trace, patch_message: str | None) -> dict:
         'touched_files': patch.changed_files if patch is not None else [],
         'commands_requested': _commands_from_notes(notes),
         'warnings': warnings,
+        'failure_reason': failure_reason,
         'artifacts': [
             {
                 'kind': 'search_trace',
