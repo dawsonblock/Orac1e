@@ -182,7 +182,9 @@ def _validate_worktree_lineage(canonical_repo: Path, worktree_repo: Path) -> str
 
 
 def _capture_environment(repo: Path) -> dict[str, str]:
-    """Capture environment information for equivalence checking."""
+    """Capture environment information for equivalence checking using SHA-256."""
+    import hashlib
+    
     env = {}
     
     # Capture Python version
@@ -205,15 +207,30 @@ def _capture_environment(repo: Path) -> dict[str, str]:
     if proc.returncode == 0:
         env["node_version"] = proc.stdout.strip()
     
-    # Capture key dependency hashes
-    lock_files = ["requirements.txt", "package-lock.json", "Cargo.lock", "pyproject.toml"]
-    hashes = []
-    for lock in lock_files:
+    # Capture key dependency hashes using SHA-256
+    lock_files = [
+        "requirements.txt",
+        "requirements-dev.txt",
+        "poetry.lock",
+        "pyproject.toml",
+        "package-lock.json",
+        "pnpm-lock.yaml",
+        "yarn.lock",
+        "package.json",
+        "Package.resolved",
+        "Package.swift",
+        ".oracle-validation.json"
+    ]
+    
+    hasher = hashlib.sha256()
+    for lock in sorted(lock_files):
         lock_path = repo / lock
         if lock_path.exists():
-            content = lock_path.read_bytes()
-            hashes.append(f"{lock}:{hash(content)}")
-    env["dependencies_hash"] = "|".join(hashes)
+            hasher.update(f"{lock}:".encode())
+            hasher.update(lock_path.read_bytes())
+            hasher.update(b"\n")
+    
+    env["dependencies_hash"] = hasher.hexdigest()
     
     return env
 
@@ -289,18 +306,60 @@ def _rollback_canonical(canonical_repo: Path, should_rollback: bool) -> None:
         _run(["git", "-C", str(canonical_repo), "clean", "-fd"], check=False)
 
 
+def _resolve_validation_profile(repo: Path, metadata: dict[str, Any]) -> tuple[str, int, list[dict[str, Any]], bool]:
+    """
+    Resolve validation profile with precedence:
+    1. Explicit run override (preferredValidationProfile in metadata)
+    2. Repo-local .oracle-validation.json
+    3. Inferred profile from file detection
+    4. Fallback default
+    
+    Returns: (profile_name, profile_version, stages, allow_no_validation)
+    """
+    # 1. Check for explicit override in run metadata
+    if preferred := metadata.get("preferredValidationProfile"):
+        profile_name = preferred
+        profile_version = 1
+        allow_no_validation = metadata.get("allowNoValidation", False)
+        return profile_name, profile_version, [], allow_no_validation
+    
+    # 2. Check for repo-local override
+    local_config = repo / ".oracle-validation.json"
+    if local_config.exists():
+        try:
+            config = json.loads(local_config.read_text(encoding="utf-8"))
+            return (
+                config.get("profile", "default"),
+                config.get("version", 1),
+                config.get("stages", []),
+                config.get("allowNoValidation", False)
+            )
+        except json.JSONDecodeError:
+            pass  # Fall through to inference
+    
+    # 3-4. Inference handled by Swift side, return default
+    return "default", 1, [], False
+
+
 def promote_run(
     run_id: str,
     actor: str = "operator",
     note: str = "",
     cleanup_worktree: bool = True,
     allow_skip_canonical_validation: bool = False,
+    allow_no_validation: bool = False,
 ) -> PromotionResult:
     run = _load_run(run_id)
     metadata = _load_metadata(run_id)
     canonical_repo = Path(metadata.get("canonicalRepoPath") or run.get("repoPath") or "").resolve()
     worktree_repo = Path(metadata.get("worktreePath") or ROOT / "workspace" / "worktrees" / run_id).resolve()
+    
+    # Support both legacy flat commands and new stage-based validation
     validation_commands = list(metadata.get("validationCommands") or [])
+    validation_stages = metadata.get("validationStages", [])
+    validation_profile_name = metadata.get("validationProfileName", "default")
+    validation_profile_version = metadata.get("validationProfileVersion", 1)
+    allow_no_validation = allow_no_validation or metadata.get("allowNoValidation", False) or os.environ.get("ORACLE_ALLOW_NO_VALIDATION") == "1"
 
     # Normalized status vocabulary check - load immediately after run
     current_status = run.get("status")
@@ -334,6 +393,33 @@ def promote_run(
     if not _repo_is_clean(canonical_repo):
         raise PromotionError("canonical repo is dirty; refusing promotion")
 
+    # Check if validation is configured - fail-closed unless explicitly allowed
+    has_validation = bool(validation_commands or validation_stages)
+    if not has_validation and not allow_no_validation:
+        raise PromotionError("no validation configured and allowNoValidation is not enabled")
+    
+    if not has_validation and allow_no_validation:
+        # Skip validation entirely if explicitly allowed
+        pre_validation = {
+            "ok": True,
+            "steps": [{"name": "validation_skipped", "ok": True, "stdout": "", "stderr": "", "exitCode": 0, "skipped": True}],
+            "environment": _capture_environment(worktree_repo),
+            "skipped": True,
+            "skip_reason": "allow_no_validation",
+        }
+    else:
+        # Flatten stages to commands for execution (backward compatible)
+        commands_to_run = validation_commands
+        if validation_stages:
+            commands_to_run = []
+            for stage in validation_stages:
+                commands_to_run.extend(stage.get("commands", []))
+        
+        pre_validation = _run_validation(worktree_repo, commands_to_run)
+        _write_validation_artifact(run_id, pre_validation, "worktree")
+        if not pre_validation["ok"]:
+            raise PromotionError("worktree validation failed before promotion")
+
     base_commit = _validate_worktree_lineage(canonical_repo, worktree_repo)
     approval = _record_approval(run_id, "approved", actor, note)
     _record_event(run_id, "approval.recorded", approval)
@@ -342,11 +428,6 @@ def promote_run(
     patch_applied = False
 
     try:
-        pre_validation = _run_validation(worktree_repo, validation_commands)
-        _write_validation_artifact(run_id, pre_validation, "worktree")
-        if not pre_validation["ok"]:
-            raise PromotionError("worktree validation failed before promotion")
-
         _, patch_file = _capture_patch(worktree_repo, run_id)
 
         worktree_env = pre_validation.get("environment", {})
@@ -398,6 +479,9 @@ def promote_run(
             "patch_file": str(patch_file),
             "canonical_validation_ran": canonical_validation_ran,
             "canonical_validation_skip_reason": canonical_validation_skip_reason,
+            "validation_profile_name": validation_profile_name,
+            "validation_profile_version": validation_profile_version,
+            "validation_stages_count": len(validation_stages),
         }
         _record_promotion(run_id, receipt)
         _record_event(run_id, "promotion.completed", receipt)
@@ -470,6 +554,7 @@ def main() -> int:
     parser.add_argument("--reject", action="store_true")
     parser.add_argument("--keep-worktree", action="store_true")
     parser.add_argument("--allow-skip-canonical-validation", action="store_true", help="Allow skipping canonical validation when environments match")
+    parser.add_argument("--allow-no-validation", action="store_true", help="Allow promotion without validation (dangerous)")
     args = parser.parse_args()
 
     try:
@@ -482,6 +567,7 @@ def main() -> int:
                 note=args.note,
                 cleanup_worktree=not args.keep_worktree,
                 allow_skip_canonical_validation=args.allow_skip_canonical_validation,
+                allow_no_validation=args.allow_no_validation,
             ).to_dict()
     except PromotionError as exc:
         print(json.dumps({"ok": False, "error": str(exc)}, sort_keys=True))

@@ -159,10 +159,13 @@ User Request
 # Step 3: Start all services (retrieval → workers → Oracle)
 ./scripts/start_all.sh
 
-# Step 4: Smoke test
+# Step 4: Quick smoke test (service health checks)
 ./scripts/smoke_test.sh
 
-# Step 5: Use the CLI
+# Step 5: Full E2E smoke test (complete operator loop)
+./scripts/smoke_e2e.sh
+
+# Step 6: Use the CLI
 oracle coding help
 ```
 
@@ -174,6 +177,7 @@ oracle coding help
 | Retrieval broker | `8787` | cocoindex integration |
 | Aider adapter | `8788` | Interactive coding worker |
 | Hardened adapter | `8789` | Autonomous coding worker |
+| Run server | `8790` | Coding runs API server |
 
 ### Start Services Individually
 
@@ -206,9 +210,11 @@ oracle coding help
 | `BROKER_PORT` | `8787` | Retrieval broker port |
 | `AIDER_PORT` | `8788` | Aider adapter port |
 | `HARDENED_PORT` | `8789` | Hardened adapter port |
+| `RUN_SERVER_PORT` | `8790` | Run server port |
 | `COCOINDEX_REPO_PATH` | — | Path to cocoindex repo |
 | `ORACLE_SKIP_PIP_INSTALL` | `0` | Set to `1` to skip pip |
 | `ORACLE_ALLOW_UNSUPPORTED_PYTHON` | `0` | Set to `1` to bypass version check |
+| `ORACLE_ALLOW_NO_VALIDATION` | `0` | Set to `1` to skip validation (dangerous) |
 
 ---
 

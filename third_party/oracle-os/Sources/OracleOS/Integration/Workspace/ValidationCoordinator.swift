@@ -39,13 +39,8 @@ public actor CodingValidationCoordinator {
         self.configRootURL = configRootURL
     }
 
-    public func resolvePlan(for repoURL: URL) -> (profileName: String, commands: [String], stageCount: Int) {
-        let plan = executionPlan(for: repoURL)
-        return (
-            profileName: plan.profileName,
-            commands: plan.resolvedCommands,
-            stageCount: plan.stages.count
-        )
+    public func resolvePlan(for repoURL: URL) -> CodingValidationExecutionPlan {
+        return executionPlan(for: repoURL)
     }
 
     public func validate(repoURL: URL) async -> CodingValidationResult {
@@ -256,8 +251,11 @@ public actor CodingValidationCoordinator {
         cwd: String,
         stageID: String,
         stageName: String,
-        profileName: String
+        profileName: String,
+        timeoutSeconds: TimeInterval = 300  // 5 minutes default
     ) async -> CodingValidationStep {
+        let startTime = Date()
+        
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
         process.arguments = ["-lc", command]
@@ -268,22 +266,52 @@ public actor CodingValidationCoordinator {
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
 
+        var stdoutData = Data()
+        var stderrData = Data()
+        let stdoutHandle = stdoutPipe.fileHandleForReading
+        let stderrHandle = stderrPipe.fileHandleForReading
+        
+        // Use readabilityHandler for non-blocking concurrent pipe draining
+        stdoutHandle.readabilityHandler = { handle in
+            let chunk = handle.availableData
+            if !chunk.isEmpty {
+                stdoutData.append(chunk)
+            }
+        }
+        
+        stderrHandle.readabilityHandler = { handle in
+            let chunk = handle.availableData
+            if !chunk.isEmpty {
+                stderrData.append(chunk)
+            }
+        }
+
+        var timedOut = false
+        var didTerminate = false
+        
+        // Run process with timeout handling
         do {
             try process.run()
+            
+            // Wait with timeout
+            let timeoutWorkItem = DispatchWorkItem {
+                timedOut = true
+                if !didTerminate {
+                    process.terminate()
+                }
+            }
+            DispatchQueue.global().asyncAfter(deadline: .now() + timeoutSeconds, execute: timeoutWorkItem)
+            
             process.waitUntilExit()
-            let stdout = String(data: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            let stderr = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            return CodingValidationStep(
-                name: command,
-                ok: process.terminationStatus == 0,
-                stdout: stdout,
-                stderr: stderr,
-                exitCode: process.terminationStatus,
-                stageID: stageID,
-                stageName: stageName,
-                profileName: profileName
-            )
+            timeoutWorkItem.cancel()
+            didTerminate = true
+            
         } catch {
+            // Clean up handlers on error
+            stdoutHandle.readabilityHandler = nil
+            stderrHandle.readabilityHandler = nil
+            
+            let durationMs = Int(Date().timeIntervalSince(startTime) * 1000)
             return CodingValidationStep(
                 name: command,
                 ok: false,
@@ -292,8 +320,44 @@ public actor CodingValidationCoordinator {
                 exitCode: 1,
                 stageID: stageID,
                 stageName: stageName,
-                profileName: profileName
+                profileName: profileName,
+                timedOut: false,
+                durationMs: durationMs,
+                failureCategory: "process_start_failure"
             )
         }
+        
+        // Clear handlers after completion
+        stdoutHandle.readabilityHandler = nil
+        stderrHandle.readabilityHandler = nil
+        
+        let durationMs = Int(Date().timeIntervalSince(startTime) * 1000)
+        
+        // Determine failure category
+        let failureCategory: String?
+        if timedOut {
+            failureCategory = "timeout"
+        } else if process.terminationStatus != 0 {
+            failureCategory = "exit_failure"
+        } else {
+            failureCategory = nil
+        }
+        
+        let stdout = String(data: stdoutData, encoding: .utf8) ?? ""
+        let stderr = String(data: stderrData, encoding: .utf8) ?? ""
+        
+        return CodingValidationStep(
+            name: command,
+            ok: !timedOut && process.terminationStatus == 0,
+            stdout: stdout,
+            stderr: stderr,
+            exitCode: timedOut ? -1 : process.terminationStatus,
+            stageID: stageID,
+            stageName: stageName,
+            profileName: profileName,
+            timedOut: timedOut,
+            durationMs: durationMs,
+            failureCategory: failureCategory
+        )
     }
 }

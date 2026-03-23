@@ -10,6 +10,9 @@ public struct CodingValidationStep: Codable, Sendable, Identifiable {
     public let stageID: String?
     public let stageName: String?
     public let profileName: String?
+    public let timedOut: Bool
+    public let durationMs: Int
+    public let failureCategory: String?
 
     public init(
         name: String,
@@ -19,7 +22,10 @@ public struct CodingValidationStep: Codable, Sendable, Identifiable {
         exitCode: Int32,
         stageID: String? = nil,
         stageName: String? = nil,
-        profileName: String? = nil
+        profileName: String? = nil,
+        timedOut: Bool = false,
+        durationMs: Int = 0,
+        failureCategory: String? = nil
     ) {
         self.id = UUID()
         self.name = name
@@ -30,6 +36,9 @@ public struct CodingValidationStep: Codable, Sendable, Identifiable {
         self.stageID = stageID
         self.stageName = stageName
         self.profileName = profileName
+        self.timedOut = timedOut
+        self.durationMs = durationMs
+        self.failureCategory = failureCategory
     }
 }
 
