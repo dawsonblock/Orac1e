@@ -15,8 +15,9 @@ classifiers = [
     "Programming Language :: Python",
     "Topic :: Software Development",
 ]
-requires-python = ">=3.10,<3.13"
-dynamic = ["dependencies", "optional-dependencies", "version"]
+requires-python = ">=3.10"
+# dynamic = ["dependencies", "optional-dependencies", "version"]
+version = "0.74.2"
 
 [project.urls]
 Homepage = "https://github.com/Aider-AI/aider"
@@ -24,14 +25,14 @@ Homepage = "https://github.com/Aider-AI/aider"
 [project.scripts]
 aider = "aider.main:main"
 
-[tool.setuptools.dynamic]
-dependencies = { file = "requirements.txt" }
+# [tool.setuptools.dynamic]
+# dependencies = { file = "requirements.txt" }
 
-[tool.setuptools.dynamic.optional-dependencies]
-dev = { file = "requirements/requirements-dev.txt" }
-help = { file = "requirements/requirements-help.txt" }
-browser = { file = "requirements/requirements-browser.txt" }
-playwright = { file = "requirements/requirements-playwright.txt" }
+# [tool.setuptools.dynamic.optional-dependencies]
+# dev = { file = "requirements/requirements-dev.txt" }
+# help = { file = "requirements/requirements-help.txt" }
+# browser = { file = "requirements/requirements-browser.txt" }
+# playwright = { file = "requirements/requirements-playwright.txt" }
 
 [tool.setuptools]
 include-package-data = true
@@ -40,11 +41,11 @@ include-package-data = true
 include = ["aider"]
 
 [build-system]
-requires = ["setuptools>=68", "setuptools_scm[toml]>=8"]
+requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools_scm]
-write_to = "aider/_version.py"
+# [tool.setuptools_scm]
+# write_to = "aider/_version.py"
 
 [tool.codespell]
 skip = "*.svg,Gemfile.lock,tests/fixtures/*,aider/website/assets/*"

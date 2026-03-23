@@ -28,23 +28,23 @@ grep -vE "git\+https|egg=" requirements.txt > requirements_bootstrap.txt
 
 # 4. Install local editable modules
 echo -e "${BLUE}[bootstrap] 4/6 Installing local modules...${NC}"
-.venv/bin/pip install --no-deps -e third_party/cocoindex-code > /dev/null
-.venv/bin/pip install --no-deps -e third_party/code-agent-runtime > /dev/null
-.venv/bin/pip install --no-deps -e . > /dev/null
+.venv/bin/pip install -e third_party/aider > /dev/null
+.venv/bin/pip install -e third_party/cocoindex-code > /dev/null
+.venv/bin/pip install -e third_party/code-agent-runtime > /dev/null
+.venv/bin/pip install -e . > /dev/null
 
-# 5. Verify Aider (Vendored)
+# 5. Verify Aider (Installed)
 echo -e "${BLUE}[bootstrap] 5/6 Verifying aider...${NC}"
-export PYTHONPATH=$PWD/third_party/aider
-if .venv/bin/python -m aider.main --help > /dev/null 2>&1; then
+if .venv/bin/aider --version > /dev/null 2>&1; then
     echo -e "${GREEN}[bootstrap] Aider OK${NC}"
 else
     echo -e "${RED}[bootstrap] Aider check failed. Installing missing deps...${NC}"
     .venv/bin/pip install json5 pexpect pydub sounddevice soundfile analytics-python monotonic > /dev/null
-    if .venv/bin/python -m aider.main --help > /dev/null 2>&1; then
+    if .venv/bin/aider --version > /dev/null 2>&1; then
         echo -e "${GREEN}[bootstrap] Aider OK (fixed)${NC}"
     else
         echo -e "${RED}[bootstrap] Aider FAIL - manual intervention required${NC}"
-        .venv/bin/python -m aider.main --help
+        .venv/bin/aider --version
         exit 1
     fi
 fi
