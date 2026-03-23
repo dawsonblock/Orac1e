@@ -3,11 +3,19 @@ from __future__ import annotations
 import os
 from fastapi import FastAPI, HTTPException
 
+from integration import preflight
 from integration.shared_py.models import HealthResponse, ProposeRequest, ProposeResponse
+from integration.shared_py.logging_utils import emit
 from integration.tool_sdk.base_models import ToolInvokeEnvelope, ToolResponseEnvelope
 from integration.worker_hardened.bridge import run_hardened
 
 app = FastAPI(title="worker-hardened", version="0.2.0")
+
+try:
+    preflight.check_hardened_worker()
+except RuntimeError as _preflight_err:
+    emit("startup", "preflight_failed", worker="worker-hardened", error=str(_preflight_err))
+    raise
 
 SUPPORTED_CAPABILITIES = {"worker.code.patch", "worker.code.issue_fix"}
 

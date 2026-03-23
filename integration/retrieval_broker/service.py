@@ -3,12 +3,20 @@ from __future__ import annotations
 import os
 from fastapi import FastAPI, HTTPException
 
+from integration import preflight
 from integration.shared_py.models import HealthResponse, RetrievalRequest, RetrievalResponse
+from integration.shared_py.logging_utils import emit
 from integration.retrieval_broker.coco_client import search_code
 from integration.retrieval_broker.search_merge import sort_results
 from integration.tool_sdk.base_models import ToolInvokeEnvelope, ToolResponseEnvelope
 
 app = FastAPI(title="retrieval-broker", version="0.2.0")
+
+try:
+    preflight.check_retrieval()
+except RuntimeError as _preflight_err:
+    emit("startup", "preflight_failed", worker="retrieval-broker", error=str(_preflight_err))
+    raise
 
 SUPPORTED_CAPABILITIES = {"retrieval.code.search"}
 

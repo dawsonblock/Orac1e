@@ -3,11 +3,19 @@ from __future__ import annotations
 import os
 from fastapi import FastAPI, HTTPException
 
+from integration import preflight
 from integration.shared_py.models import HealthResponse, ProposeRequest, ProposeResponse
+from integration.shared_py.logging_utils import emit
 from integration.tool_sdk.base_models import ToolInvokeEnvelope, ToolResponseEnvelope
 from integration.worker_aider.runner import run_aider
 
 app = FastAPI(title="worker-aider", version="0.2.0")
+
+try:
+    preflight.check_aider_worker()
+except RuntimeError as _preflight_err:
+    emit("startup", "preflight_failed", worker="worker-aider", error=str(_preflight_err))
+    raise
 
 SUPPORTED_CAPABILITIES = {"worker.code.patch", "worker.code.interactive"}
 

@@ -1,0 +1,21 @@
+# Oracle Build — System Configuration
+# Controls which services are enabled and how they behave.
+# Preflight checks honour these flags: a service that is enabled=true
+# will raise a RuntimeError at startup if its dependencies are missing.
+
+workers:
+  aider:
+    enabled: true
+  hardened:
+    enabled: true
+
+retrieval:
+  enabled: true
+
+run_server:
+  enabled: true
+
+# Oracle Swift controller — requires macOS 14 and a successful swift build.
+# Set to false to skip Oracle startup in run_local.sh.
+oracle:
+  enabled: true

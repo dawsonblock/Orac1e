@@ -66,6 +66,11 @@ class TestEmptyValidationFailure:
             promotion_env["metadata_dir"] / f"{promotion_env['run_id']}.json"
         ).write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
+        # Write a change so there is a real diff to promote
+        (promotion_env["worktree"] / "app.py").write_text(
+            "print('allow_no_validation')\n", encoding="utf-8"
+        )
+
         # Promotion should succeed with allowNoValidation
         result = crp.promote_run(
             promotion_env["run_id"], actor="tester", note="skip validation"
@@ -90,6 +95,11 @@ class TestEmptyValidationFailure:
         (
             promotion_env["metadata_dir"] / f"{promotion_env['run_id']}.json"
         ).write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+
+        # Write a change so there is a real diff to promote
+        (promotion_env["worktree"] / "app.py").write_text(
+            "print('cli_flag')\n", encoding="utf-8"
+        )
 
         # Test with allow_no_validation=True in the call
         result = crp.promote_run(
@@ -123,6 +133,11 @@ class TestEmptyValidationStageMetadata:
         (
             promotion_env["metadata_dir"] / f"{promotion_env['run_id']}.json"
         ).write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+
+        # Write a change so there is a real diff to promote
+        (promotion_env["worktree"] / "app.py").write_text(
+            "print('skip_meta')\n", encoding="utf-8"
+        )
 
         # Promote
         result = crp.promote_run(
@@ -193,6 +208,11 @@ class TestAllowNoValidationEnvVar:
             promotion_env["metadata_dir"] / f"{promotion_env['run_id']}.json"
         ).write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
+        # Write a change so there is a real diff to promote
+        (promotion_env["worktree"] / "app.py").write_text(
+            "print('env_var')\n", encoding="utf-8"
+        )
+
         # Promotion should succeed via env var
         result = crp.promote_run(
             promotion_env["run_id"], actor="tester", note="env var override"
@@ -246,6 +266,11 @@ class TestValidationStagesWithEmptyCommands:
         (
             promotion_env["metadata_dir"] / f"{promotion_env['run_id']}.json"
         ).write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+
+        # Write a change so there is a real diff to promote
+        (promotion_env["worktree"] / "app.py").write_text(
+            "print('stages_skipped')\n", encoding="utf-8"
+        )
 
         result = crp.promote_run(
             promotion_env["run_id"], actor="tester", note="skip all stages"

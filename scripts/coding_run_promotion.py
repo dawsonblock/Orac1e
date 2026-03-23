@@ -482,6 +482,14 @@ def promote_run(
             "validation_profile_name": validation_profile_name,
             "validation_profile_version": validation_profile_version,
             "validation_stages_count": len(validation_stages),
+            "validation": {
+                "mode": "skipped" if pre_validation.get("skipped") else "full",
+                "ok": True,
+                "step_count": len(pre_validation.get("steps", [])),
+                "skipped": bool(pre_validation.get("skipped")),
+                "skip_reason": pre_validation.get("skip_reason"),
+                "error_category": pre_validation.get("error_category"),
+            },
         }
         _record_promotion(run_id, receipt)
         _record_event(run_id, "promotion.completed", receipt)
@@ -505,6 +513,7 @@ def promote_run(
         _rollback_canonical(canonical_repo, should_rollback)
         run["status"] = "failed"
         _replace_run(run)
+        _pre = locals().get("pre_validation") or {}
         receipt = {
             "run_id": run_id,
             "actor": actor,
@@ -518,6 +527,14 @@ def promote_run(
             "error": str(exc),
             "canonical_validation_ran": locals().get("canonical_validation_ran", False),
             "canonical_validation_skip_reason": locals().get("canonical_validation_skip_reason"),
+            "validation": {
+                "mode": "skipped" if _pre.get("skipped") else "full",
+                "ok": False,
+                "step_count": len(_pre.get("steps", [])),
+                "skipped": bool(_pre.get("skipped")),
+                "skip_reason": _pre.get("skip_reason"),
+                "error_category": _pre.get("error_category"),
+            },
         }
         _record_promotion(run_id, receipt)
         _record_event(run_id, "promotion.failed", receipt)
