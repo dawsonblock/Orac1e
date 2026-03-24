@@ -29,18 +29,36 @@ def test_full_pipeline(tmp_path, monkeypatch):
     )
 
     def fake_create_plan(task, context):
+        # Return a wrong plan initially to test the failure analysis path
         return {
             "edits": [
                 {
                     "file": "parser.py",
                     "search": "def first_token(tokens):\n    return tokens[0]\n",
-                    "replace": "def first_token(tokens):\n    if not tokens:\n        return None\n    return tokens[0]\n"
+                    "replace": "def first_token(tokens):\n    return tokens[0]  # wrong fix\n"
                 }
             ]
         }
 
+    call_count = 0
+    def fake_analyze_failure(task, error_output, context):
+        nonlocal call_count
+        call_count += 1
+        # Return the correct fix plan on failure analysis
+        if call_count == 1:
+            return {
+                "edits": [
+                    {
+                        "file": "parser.py",
+                        "search": "def first_token(tokens):\n    return tokens[0]  # wrong fix\n",
+                        "replace": "def first_token(tokens):\n    if not tokens:\n        return None\n    return tokens[0]\n"
+                    }
+                ]
+            }
+        return None
+
     monkeypatch.setattr("integration.pipeline.create_plan", fake_create_plan)
-    monkeypatch.setattr("integration.pipeline.analyze_failure", lambda task, error_output, context: None)
+    monkeypatch.setattr("integration.pipeline.analyze_failure", fake_analyze_failure)
 
     # Run the pipeline
     result = run_pipeline(

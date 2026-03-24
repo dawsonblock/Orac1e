@@ -2,6 +2,7 @@
 
 import logging
 import subprocess
+import sys
 from pathlib import Path
 from typing import Tuple
 
@@ -22,7 +23,7 @@ def run_tests(repo: str) -> Tuple[bool, str]:
 
     try:
         result = subprocess.run(
-            ["python", "-m", "pytest", "-q"],
+            [sys.executable, "-m", "pytest", "-q"],
             cwd=repo_path,
             capture_output=True,
             text=True,

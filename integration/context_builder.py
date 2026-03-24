@@ -22,10 +22,9 @@ def build_context(repo: str, max_files: int = 8, max_chars_per_file: int = 2000)
 
     # Walk the repo for Python files
     for root, _, filenames in os.walk(repo_path):
-        # Skip hidden and cache directories
-        if any(part.startswith('.') for part in Path(root).parts):
-            continue
-        if '__pycache__' in root:
+        # Skip specific directories that shouldn't be scanned
+        skip_dirs = {'.git', '__pycache__', '.venv', 'venv', '.tox', 'node_modules', '.pytest_cache'}
+        if any(part in skip_dirs for part in Path(root).parts):
             continue
 
         for f in filenames:

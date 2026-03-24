@@ -17,22 +17,29 @@ def _write_text_atomic(full_path: Path, content: str) -> None:
         os.replace(temp_path, full_path)
     except Exception:
         try:
+            os.close(temp_fd)
+        except OSError:
+            pass
+        try:
             os.unlink(temp_path)
         except OSError:
             pass
         raise
 
 
-def _rollback_changes(repo_path: Path, applied_files: List[str], original_contents: Dict[str, str]) -> None:
+def _rollback_changes(repo_path: Path, applied_files: List[str], original_contents: Dict[str, str]) -> List[str]:
+    """Restore files to original state. Returns list of files that failed to restore."""
     restored = set()
+    failed = []
     for file_path in reversed(applied_files):
         if file_path in restored or file_path not in original_contents:
             continue
         try:
             _write_text_atomic(repo_path / file_path, original_contents[file_path])
             restored.add(file_path)
-        except Exception:
-            pass  # Continue trying to restore other files
+        except Exception as e:
+            failed.append(f"{file_path}: {e}")
+    return failed
 
 
 def apply_plan(plan: Dict[str, Any], repo: str) -> Dict[str, Any]:
@@ -57,10 +64,9 @@ def apply_plan(plan: Dict[str, Any], repo: str) -> Dict[str, Any]:
 
     def fail(error: str) -> Dict[str, Any]:
         if applied_files:
-            try:
-                _rollback_changes(repo_path, applied_files, original_contents)
-            except Exception as rollback_error:
-                return {"success": False, "error": f"{error}; rollback failed: {rollback_error}"}
+            failed = _rollback_changes(repo_path, applied_files, original_contents)
+            if failed:
+                return {"success": False, "error": f"{error}; rollback failed for: {', '.join(failed)}"}
         return {"success": False, "error": error}
 
     for edit in edits:
@@ -69,11 +75,14 @@ def apply_plan(plan: Dict[str, Any], repo: str) -> Dict[str, Any]:
         replace = edit.get("replace", "")
 
         if not file_path or not search:
-            return fail(f"Invalid edit: missing file or search")
+            return fail("Invalid edit: missing file or search")
 
         full_path = repo_path / file_path
 
-        # Security: ensure file is within repo
+        # Security: ensure file is within repo and not a symlink
+        if full_path.is_symlink():
+            return fail(f"Symlinks not allowed: {file_path}")
+
         try:
             resolved = full_path.resolve()
             repo_resolved = repo_path.resolve()
@@ -92,8 +101,15 @@ def apply_plan(plan: Dict[str, Any], repo: str) -> Dict[str, Any]:
         if file_path not in original_contents:
             original_contents[file_path] = content
 
-        # Verify search exists
-        if search not in content:
+        # Verify search exists with exact line matching
+        search_lines = search.splitlines()
+        content_lines = content.splitlines()
+        found = False
+        for i in range(len(content_lines) - len(search_lines) + 1):
+            if content_lines[i:i + len(search_lines)] == search_lines:
+                found = True
+                break
+        if not found:
             return fail(f"Search text not found in {file_path}")
 
         # Apply replacement

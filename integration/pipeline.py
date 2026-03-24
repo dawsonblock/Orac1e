@@ -27,14 +27,14 @@ def run_pipeline(task: str, repo: str) -> Dict[str, Any]:
     """
     logger.info(f"Starting pipeline for task: {task}")
 
-    # Build context once at the start
-    context = build_context(repo)
-    logger.info(f"Built context with {len(context)} items")
-
     current_plan: Optional[Dict[str, Any]] = None
 
     for attempt in range(MAX_ATTEMPTS):
         logger.info(f"Attempt {attempt + 1}/{MAX_ATTEMPTS}")
+
+        # Build fresh context on each attempt to reflect current file state
+        context = build_context(repo)
+        logger.info(f"Built context with {len(context)} items")
 
         # Get plan (initial or from failure analysis)
         if current_plan is None:
@@ -67,7 +67,7 @@ def run_pipeline(task: str, repo: str) -> Dict[str, Any]:
                 "files_changed": result.get("files", [])
             }
 
-        # Tests failed - analyze and replan
+        # Tests failed - analyze and replan with fresh context
         logger.info("Tests failed, analyzing failure output")
         current_plan = analyze_failure(task, test_output, context)
 
