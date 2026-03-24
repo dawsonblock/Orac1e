@@ -53,6 +53,8 @@ LOG_DIR="${ROOT}/workspace/logs"
 PID_DIR="${ROOT}/workspace/pids"
 mkdir -p "${LOG_DIR}" "${PID_DIR}"
 
+export CODE_AGENT_REPO_PATH="${ROOT}/third_party/code-agent-runtime"
+
 log() { echo "[run_local] $*"; }
 
 # Read configs/system.yaml and return 0 (enabled) or 1 (disabled) for a

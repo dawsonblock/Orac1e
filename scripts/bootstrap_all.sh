@@ -1,5 +1,5 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
 
 # Colors
 GREEN='\033[0;32m'
@@ -50,6 +50,7 @@ if [ ! -d ".venv" ]; then
 else
     echo -e "${BLUE}[bootstrap] 1/6 Reusing existing venv...${NC}"
 fi
+source .venv/bin/activate
 
 # Use explicit venv Python for all subsequent operations
 VENV_PYTHON=".venv/bin/python"
@@ -59,10 +60,9 @@ VENV_PIP=".venv/bin/pip"
 echo -e "${BLUE}[bootstrap] 2/6 Upgrading toolchain...${NC}"
 "$VENV_PIP" install --upgrade pip setuptools wheel hatchling editables > /dev/null
 
-# 3. Install core dependencies (excluding problematic git ones first)
+# 3. Install core dependencies
 echo -e "${BLUE}[bootstrap] 3/6 Installing standard requirements...${NC}"
-grep -vE "git\+https|egg=" requirements.txt > requirements_bootstrap.txt
-"$VENV_PIP" install -r requirements_bootstrap.txt > /dev/null
+"$VENV_PIP" install -r requirements.txt > /dev/null
 
 # 4. Install local editable modules
 echo -e "${BLUE}[bootstrap] 4/6 Installing local modules...${NC}"
@@ -71,8 +71,17 @@ echo -e "${BLUE}[bootstrap] 4/6 Installing local modules...${NC}"
 "$VENV_PIP" install -e third_party/code-agent-runtime > /dev/null
 "$VENV_PIP" install -e . > /dev/null
 
-# 5. Verify Aider (Installed)
-echo -e "${BLUE}[bootstrap] 5/6 Verifying aider...${NC}"
+# 5. Verify imports
+echo -e "${BLUE}[bootstrap] 5/6 Verifying imports...${NC}"
+IMPORT_OK=true
+for module_name in integration aider cocoindex fastapi pydantic git; do
+    if ! "$VENV_PYTHON" -c "import $module_name" 2>/dev/null; then
+        echo -e "${RED}[bootstrap] Import failed: $module_name${NC}"
+        IMPORT_OK=false
+    fi
+done
+
+# Verify aider specifically
 if "$VENV_PYTHON" -m aider --version > /dev/null 2>&1 || "$VENV_PYTHON" -c "import aider" > /dev/null 2>&1; then
     echo -e "${GREEN}[bootstrap] Aider OK${NC}"
 else
@@ -82,7 +91,7 @@ else
         echo -e "${GREEN}[bootstrap] Aider OK (fixed)${NC}"
     else
         echo -e "${RED}[bootstrap] Aider FAIL - manual intervention required${NC}"
-        exit 1
+        IMPORT_OK=false
     fi
 fi
 
