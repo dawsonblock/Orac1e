@@ -34,17 +34,24 @@ if [[ ! -f "${VENV}/bin/activate" ]]; then
     exit 1
 fi
 
+# ============================================================================
+# Consistent venv activation - use explicit paths after this
+# ============================================================================
 source "${VENV}/bin/activate"
-python -c "from integration.preflight import check; check()"
+
+# Use venv Python explicitly for all operations
+VENV_PYTHON="${VENV}/bin/python"
+
+# Verify preflight works with activated venv
+"$VENV_PYTHON" -c "from integration.preflight import check; check()"
+
+# Load common utilities
 source "${ROOT}/scripts/common.sh"
 load_env
 
 LOG_DIR="${ROOT}/workspace/logs"
 PID_DIR="${ROOT}/workspace/pids"
 mkdir -p "${LOG_DIR}" "${PID_DIR}"
-
-export PYTHONPATH="${ROOT}:${ROOT}/third_party/code-agent-runtime:${PYTHONPATH:-}"
-export CODE_AGENT_REPO_PATH="${ROOT}/third_party/code-agent-runtime"
 
 log() { echo "[run_local] $*"; }
 
@@ -53,7 +60,7 @@ log() { echo "[run_local] $*"; }
 # Defaults to enabled when the key is absent or PyYAML is unavailable.
 yaml_service_enabled() {
     local key_path="$1"
-    python - "${ROOT}/configs/system.yaml" "${key_path}" <<'PY'
+    "$VENV_PYTHON" - "${ROOT}/configs/system.yaml" "${key_path}" <<'PY'
 import sys
 from pathlib import Path
 try:
@@ -98,7 +105,7 @@ start_service() {
     fi
 
     log "Starting ${name} on port ${port}"
-    python -m uvicorn "${module}" \
+    "$VENV_PYTHON" -m uvicorn "${module}" \
         --host "127.0.0.1" \
         --port "${port}" \
         --log-level info \
@@ -125,8 +132,8 @@ poll_health() {
 if yaml_service_enabled "retrieval.broker.enabled"; then
     start_service "retrieval-broker" \
         "integration.retrieval_broker.service:app" \
-        "${BROKER_PORT}"
-    poll_health "retrieval-broker" "http://${ORACLE_HOST}:${BROKER_PORT}/health"
+        "${BROKER_PORT:-8081}"
+    poll_health "retrieval-broker" "http://${ORACLE_HOST:-127.0.0.1}:${BROKER_PORT:-8081}/health"
 else
     log "SKIP retrieval-broker (disabled in configs/system.yaml)"
 fi
@@ -134,8 +141,8 @@ fi
 if yaml_service_enabled "workers.aider.enabled"; then
     start_service "worker-aider" \
         "integration.worker_aider.service:app" \
-        "${AIDER_PORT}"
-    poll_health "worker-aider" "http://${ORACLE_HOST}:${AIDER_PORT}/health"
+        "${AIDER_PORT:-8082}"
+    poll_health "worker-aider" "http://${ORACLE_HOST:-127.0.0.1}:${AIDER_PORT:-8082}/health"
 else
     log "SKIP worker-aider (disabled in configs/system.yaml)"
 fi
@@ -143,15 +150,25 @@ fi
 if yaml_service_enabled "workers.hardened.enabled"; then
     start_service "worker-hardened" \
         "integration.worker_hardened.service:app" \
-        "${HARDENED_PORT}"
-    poll_health "worker-hardened" "http://${ORACLE_HOST}:${HARDENED_PORT}/health"
+        "${HARDENED_PORT:-8083}"
+    poll_health "worker-hardened" "http://${ORACLE_HOST:-127.0.0.1}:${HARDENED_PORT:-8083}/health"
 else
     log "SKIP worker-hardened (disabled in configs/system.yaml)"
 fi
 
+# Start run server
+start_service "run-server" \
+    "scripts.serve_coding_runs:app" \
+    "${RUN_SERVER_PORT:-8080}"
+poll_health "run-server" "http://${ORACLE_HOST:-127.0.0.1}:${RUN_SERVER_PORT:-8080}/health"
+
 if [[ "${NO_ORACLE}" == "0" ]] && yaml_service_enabled "oracle.swift_controller.enabled"; then
-    bash "${ROOT}/scripts/start_oracle.sh" || \
-        log "WARNING: Oracle Swift process failed to start — Python services are still up"
+    if [[ -f "${ROOT}/scripts/start_oracle.sh" ]]; then
+        bash "${ROOT}/scripts/start_oracle.sh" || \
+            log "WARNING: Oracle Swift process failed to start — Python services are still up"
+    else
+        log "WARNING: start_oracle.sh not found — skipping Oracle Swift"
+    fi
 elif [[ "${NO_ORACLE}" == "1" ]]; then
     log "SKIP oracle (--no-oracle flag)"
 else
@@ -163,9 +180,8 @@ echo "╔═══════════════════════�
 echo "║  All Python services are running                      ║"
 echo "╚══════════════════════════════════════════════════════╝"
 echo ""
-echo "  Retrieval broker : http://${ORACLE_HOST}:${BROKER_PORT}/health"
-echo "  Aider worker     : http://${ORACLE_HOST}:${AIDER_PORT}/health"
-echo "  Hardened worker  : http://${ORACLE_HOST}:${HARDENED_PORT}/health"
-echo "  Run server       : http://${ORACLE_HOST}:${RUN_SERVER_PORT}/health"
+echo "  Run server       : http://${ORACLE_HOST:-127.0.0.1}:${RUN_SERVER_PORT:-8080}/health"
+echo "  Run server ready : http://${ORACLE_HOST:-127.0.0.1}:${RUN_SERVER_PORT:-8080}/ready"
+echo "  Run endpoint     : http://${ORACLE_HOST:-127.0.0.1}:${RUN_SERVER_PORT:-8080}/run"
 echo ""
 echo "  Stop all         : bash scripts/stop_all.sh"

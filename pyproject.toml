@@ -18,7 +18,7 @@ oracle-run-server  = "scripts.serve_coding_runs:app"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["integration*", "scripts*"]
+include = ["integration*", "scripts*", "runtime*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

@@ -51,6 +51,17 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/ready")
+def ready() -> dict[str, str]:
+    """Readiness check - verifies data stores are accessible."""
+    try:
+        # Try to read runs file
+        _read_json(RUNS_FILE, [])
+        return {"status": "ready"}
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"not ready: {e}")
+
+
 def _enrich_run_with_detail(run: dict[str, Any]) -> dict[str, Any]:
     """Enrich a run with associated events, approvals, and promotions."""
     run_id = run.get("id")

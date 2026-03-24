@@ -80,9 +80,10 @@ def transition(run: "dict[str, Any]", new_state: str) -> None:
 
     allowed = VALID_TRANSITIONS.get(current, [])
     if new_state not in allowed:
+        allowed_str = "(none — unknown state)" if not allowed else str(allowed)
         raise TransitionError(
-            f"Invalid transition {current!r} \u2192 {new_state!r}; "
-            f"allowed from {current!r}: {allowed or '(none \u2014 unknown state)'}"
+            f"Invalid transition {current!r} → {new_state!r}; "
+            f"allowed from {current!r}: {allowed_str}"
         )
 
     run["status"] = new_state
