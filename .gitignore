@@ -8,6 +8,8 @@ workspace/runs/*.json
 workspace/runs/*.jsonl
 *.log
 .DS_Store
+__pycache__/
+*.pyc
 
 # Prevent editable-install artifacts inside vendored third_party from
 # polluting every Python environment on the machine via sys.path scanning.

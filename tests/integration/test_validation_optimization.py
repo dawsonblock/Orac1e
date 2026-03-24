@@ -11,15 +11,11 @@ Tests cover:
 
 from __future__ import annotations
 
-import importlib.util
-import sys
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-
-RUNTIME_AVAILABLE = importlib.util.find_spec("runtime") is not None
 
 # Use importorskip to prevent collection-time import failures
 pytest.importorskip("runtime", reason="runtime validation optimization tests require importable runtime on Python 3.11+")
