@@ -21,17 +21,17 @@ def build_context(repo: str, max_files: int = 8, max_chars_per_file: int = 2000)
     files = []
 
     # Walk the repo for Python files
-    for root, _, filenames in os.walk(repo_path):
-        # Skip specific directories that shouldn't be scanned
-        skip_dirs = {'.git', '__pycache__', '.venv', 'venv', '.tox', 'node_modules', '.pytest_cache'}
-        if any(part in skip_dirs for part in Path(root).parts):
-            continue
+    skip_dirs = {'.git', '__pycache__', '.venv', 'venv', '.tox', 'node_modules', '.pytest_cache'}
+    for root, dirs, filenames in os.walk(repo_path):
+        # Prune directories to avoid traversing into them.
+        dirs[:] = [d for d in dirs if d not in skip_dirs]
 
-        for f in filenames:
-            if f.endswith('.py'):
-                full_path = os.path.join(root, f)
-                rel_path = os.path.relpath(full_path, repo_path)
-                files.append(rel_path)
+        for filename in filenames:
+            if filename.endswith('.py'):
+                # Use pathlib for path manipulation for consistency
+                full_path = Path(root) / filename
+                rel_path = full_path.relative_to(repo_path)
+                files.append(str(rel_path))
 
     # Sort for determinism, take first max_files
     selected = sorted(files)[:max_files]
