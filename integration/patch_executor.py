@@ -104,16 +104,26 @@ def apply_plan(plan: Dict[str, Any], repo: str) -> Dict[str, Any]:
         # Verify search text exists in the content
         if search not in content:
             return fail(f"Search text not found in {file_path}")
+        content_lines_with_endings = content.splitlines(keepends=True)
+        found = False
+        found_start = None
+        found_end = None
+        for i in range(len(content_lines) - len(search_lines) + 1):
+            if content_lines[i:i + len(search_lines)] == search_lines:
+                # Map line indices back to character positions in the original content
+                start_pos = sum(len(line) for line in content_lines_with_endings[:i])
+                end_pos = start_pos + sum(
+                    len(line) for line in content_lines_with_endings[i:i + len(search_lines)]
+                )
+                found_start = start_pos
+                found_end = end_pos
+                found = True
+                break
+        if not found or found_start is None or found_end is None:
+            return fail(f"Search text not found in {file_path}")
 
-        # Apply replacement
-        new_content = content.replace(search, replace, 1)
-
-        if new_content == content:
-            return fail(f"No change made to {file_path}")
-
-        try:
-            _write_text_atomic(full_path, new_content)
-            applied_files.append(file_path)
+        # Apply replacement using the located character range
+        new_content = content[:found_start] + replace + content[found_end:]
         except OSError as e:
             return fail(f"Cannot write {file_path}: {e}")
 
