@@ -101,15 +101,8 @@ def apply_plan(plan: Dict[str, Any], repo: str) -> Dict[str, Any]:
         if file_path not in original_contents:
             original_contents[file_path] = content
 
-        # Verify search exists with exact line matching
-        search_lines = search.splitlines()
-        content_lines = content.splitlines()
-        found = False
-        for i in range(len(content_lines) - len(search_lines) + 1):
-            if content_lines[i:i + len(search_lines)] == search_lines:
-                found = True
-                break
-        if not found:
+        # Verify search text exists in the content
+        if search not in content:
             return fail(f"Search text not found in {file_path}")
 
         # Apply replacement
