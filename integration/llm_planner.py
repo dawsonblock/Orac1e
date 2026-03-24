@@ -22,21 +22,30 @@ def call_llm(prompt: str, model: str = "gpt-4o-mini") -> str:
         logger.warning("OPENAI_API_KEY not set")
         return ""
 
-    r = requests.post(
-        "https://api.openai.com/v1/chat/completions",
-        headers={
-            "Authorization": f"Bearer {API_KEY}",
-            "Content-Type": "application/json"
-        },
-        json={
-            "model": model,
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.1
-        },
-        timeout=60
-    )
-    r.raise_for_status()
-    return r.json()["choices"][0]["message"]["content"]
+    try:
+        r = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.1
+            },
+            timeout=60
+        )
+        r.raise_for_status()
+        data = r.json()
+        return data["choices"][0]["message"]["content"]
+    except requests.exceptions.RequestException as e:
+        logger.error("LLM API request failed: %s", e)
+        return ""
+    except (ValueError, KeyError, IndexError, TypeError) as e:
+        # ValueError: r.json() failed; KeyError/IndexError/TypeError: unexpected response shape
+        logger.error("Unexpected LLM API response format: %s", e)
+        return ""
 
 
 def create_plan(task: str, context: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
