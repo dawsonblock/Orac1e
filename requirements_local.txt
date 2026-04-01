@@ -2,7 +2,7 @@
 -e third_party/code-agent-runtime
 -e .
 aiohappyeyeballs==2.6.1
-aiohttp==3.13.3
+aiohttp==3.13.4
 aiosignal==1.4.0
 analytics-python==1.4.post1
 annotated-doc==0.0.4
@@ -158,7 +158,7 @@ wheel==0.46.3
 yarl==1.23.0
 zipp==3.23.0
 aiohappyeyeballs==2.6.1
-aiohttp==3.13.3
+aiohttp==3.13.4
 aiosignal==1.4.0
 analytics-python==1.4.post1
 annotated-doc==0.0.4
