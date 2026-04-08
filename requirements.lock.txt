@@ -12,7 +12,7 @@ click==8.3.1
 cocoindex==1.0.0a26
 -e git+https://github.com/dawsonblock/Orac1e.git@60bb05c04904a0ae33214755e74f1131a7197288#egg=cocoindex_code&subdirectory=third_party/cocoindex-code
 code-agent-runtime==0.7.0
-cryptography==46.0.5
+cryptography==46.0.7
 distro==1.9.0
 einops==0.8.2
 fastapi==0.135.1
