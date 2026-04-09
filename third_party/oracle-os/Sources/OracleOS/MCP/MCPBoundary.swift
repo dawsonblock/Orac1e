@@ -207,10 +207,20 @@ enum MCPBoundary {
     }
 
     static func errorContent(_ message: String) -> [String: Any] {
-        let escaped = message.replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
+        struct MCPErrorContent: Encodable {
+            let success: Bool
+            let error: String
+        }
+
+        guard let json = jsonString(from: MCPErrorContent(success: false, error: message)) else {
+            return [
+                "content": [["type": "text", "text": "{\"success\":false,\"error\":\"serialization_failed\"}"]],
+                "isError": true,
+            ]
+        }
+
         let response = MCPResponseEnvelope(
-            content: [MCPTextContent(text: "{\"success\":false,\"error\":\"\(escaped)\"}")],
+            content: [MCPTextContent(text: json)],
             isError: true
         )
         return rawResponse(response) ?? [
