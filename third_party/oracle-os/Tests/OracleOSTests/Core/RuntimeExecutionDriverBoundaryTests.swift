@@ -26,10 +26,10 @@ struct RuntimeExecutionDriverBoundaryTests {
             selectedCandidate: nil
         )
 
-        let actionResult = result.data?["action_result"] as? [String: Any]
+        let payload = result.decodePayload(RuntimeBoundaryResult.self)
         #expect(result.success == true)
-        #expect(result.data?["method"] as? String == "intent-api")
-        #expect(actionResult?["executed_through_executor"] as? Bool == true)
+        #expect(payload?.method == "intent-api")
+        #expect(payload?.actionResult.executedThroughExecutor == true)
     }
 
     @Test("Planning-failure responses are marked as non-executed")
@@ -52,9 +52,9 @@ struct RuntimeExecutionDriverBoundaryTests {
             selectedCandidate: nil
         )
 
-        let actionResult = result.data?["action_result"] as? [String: Any]
+        let payload = result.decodePayload(RuntimeBoundaryResult.self)
         #expect(result.success == false)
-        #expect(actionResult?["executed_through_executor"] as? Bool == false)
+        #expect(payload?.actionResult.executedThroughExecutor == false)
     }
 
     @Test("Planner normalizes empty action-intent app to nil")

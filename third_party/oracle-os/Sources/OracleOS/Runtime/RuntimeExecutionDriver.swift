@@ -85,20 +85,10 @@ public final class RuntimeExecutionDriver: AgentExecutionDriver {
                 let response = try await api.submitIntent(typedIntent)
                 submissionState.result = Self.makeToolResult(from: response)
             } catch {
-                submissionState.result = ToolResult(
-                    success: false,
-                    data: [
-                        "summary": "Intent submission failed",
-                        "method": "intent-api",
-                        "action_result": [
-                            "success": false,
-                            "verified": false,
-                            "executed_through_executor": false,
-                            "failure_class": "intent_submission_failed",
-                            "message": error.localizedDescription,
-                        ] as [String: Any],
-                    ],
-                    error: error.localizedDescription
+                submissionState.result = Self.makeSubmissionFailureResult(
+                    summary: "Intent submission failed",
+                    errorMessage: error.localizedDescription,
+                    failureClass: "intent_submission_failed"
                 )
             }
             semaphore.signal()
@@ -121,20 +111,11 @@ public final class RuntimeExecutionDriver: AgentExecutionDriver {
         }()
 
         if timedOut {
-            return ToolResult(
-                success: false,
-                data: [
-                    "summary": "Intent submission timed out",
-                    "method": "intent-api",
-                    "action_result": [
-                        "success": false,
-                        "verified": false,
-                        "executed_through_executor": false,
-                        "failure_class": "intent_submission_timeout",
-                        "message": "Intent submission timed out after \(Int(Self.submissionTimeoutSeconds))s",
-                    ] as [String: Any],
-                ],
-                error: "Intent submission timed out after \(Int(Self.submissionTimeoutSeconds))s"
+            let message = "Intent submission timed out after \(Int(Self.submissionTimeoutSeconds))s"
+            return Self.makeSubmissionFailureResult(
+                summary: "Intent submission timed out",
+                errorMessage: message,
+                failureClass: "intent_submission_timeout"
             )
         }
 
@@ -145,38 +126,53 @@ public final class RuntimeExecutionDriver: AgentExecutionDriver {
         let success = response.outcome == .success || response.outcome == .skipped
         let isPlanningFailure = response.summary.lowercased().hasPrefix("planning failed")
 
-        var actionResult: [String: Any] = [
-            "success": success,
-            "verified": success,
-            "executed_through_executor": !isPlanningFailure,
-            "message": response.summary,
-            "method": "intent-api",
-        ]
-        if response.outcome == .partialSuccess {
-            actionResult["failure_class"] = "partial_success"
-        } else if response.outcome == .failed {
-            actionResult["failure_class"] = isPlanningFailure ? "planning_failed" : "runtime_failed"
-        }
-
-        var data: [String: Any] = [
-            "summary": response.summary,
-            "cycleID": response.cycleID.uuidString,
-            "method": "intent-api",
-            "action_result": actionResult,
-            "trace": [
-                "cycle_id": response.cycleID.uuidString,
-                "intent_id": response.intentID.uuidString,
-            ] as [String: Any],
-        ]
-        if let snapshotID = response.snapshotID {
-            data["snapshot_id"] = snapshotID.uuidString
-        }
-
-        return ToolResult(
+        let actionResult = ActionResult(
             success: success,
-            data: data,
+            verified: success,
+            message: response.summary,
+            method: "intent-api",
+            failureClass: response.outcome == .partialSuccess
+                ? "partial_success"
+                : (response.outcome == .failed ? (isPlanningFailure ? "planning_failed" : "runtime_failed") : nil),
+            executedThroughExecutor: !isPlanningFailure
+        )
+        let trace = TraceResult(
+            cycleID: response.cycleID.uuidString,
+            intentID: response.intentID.uuidString,
+            snapshotID: response.snapshotID?.uuidString
+        )
+        let payload = RuntimeBoundaryResult(
+            summary: response.summary,
+            method: "intent-api",
+            actionResult: actionResult,
+            trace: trace
+        )
+
+        return MCPBoundary.makeToolResult(
+            success: success,
+            payload: payload,
             error: response.outcome == .failed ? response.summary : nil
         )
+    }
+
+    nonisolated private static func makeSubmissionFailureResult(
+        summary: String,
+        errorMessage: String,
+        failureClass: String
+    ) -> ToolResult {
+        let payload = RuntimeBoundaryResult(
+            summary: summary,
+            method: "intent-api",
+            actionResult: ActionResult(
+                success: false,
+                verified: false,
+                message: errorMessage,
+                method: "intent-api",
+                failureClass: failureClass,
+                executedThroughExecutor: false
+            )
+        )
+        return MCPBoundary.makeToolResult(success: false, payload: payload, error: errorMessage)
     }
 
     private static func encodeActionIntent(_ intent: ActionIntent) -> String? {

@@ -36,6 +36,22 @@ public struct ToolResult: @unchecked Sendable {
         self.context = context
     }
 
+    public init<Payload: Encodable>(
+        success: Bool,
+        payload: Payload,
+        error: String? = nil,
+        suggestion: String? = nil,
+        context: ContextInfo? = nil
+    ) throws {
+        self.init(
+            success: success,
+            data: try ToolResultCoder.encode(payload),
+            error: error,
+            suggestion: suggestion,
+            context: context
+        )
+    }
+
     /// Convert to MCP-compatible dictionary for JSON serialization.
     public func toDict() -> [String: Any] {
         var result: [String: Any] = ["success": success]
@@ -44,6 +60,26 @@ public struct ToolResult: @unchecked Sendable {
         if let suggestion { result["suggestion"] = suggestion }
         if let context { result["context"] = context.toDict() }
         return result
+    }
+
+    public func decodePayload<Payload: Decodable>(_ type: Payload.Type) -> Payload? {
+        ToolResultCoder.decode(type, from: data)
+    }
+}
+
+enum ToolResultCoder {
+    static func encode<Payload: Encodable>(_ payload: Payload) throws -> [String: Any] {
+        let object = try JSONValue.dictionary(from: payload)
+        return object.mapValues(\.foundationValue)
+    }
+
+    static func decode<Payload: Decodable>(_ type: Payload.Type, from data: [String: Any]?) -> Payload? {
+        guard let data,
+              let object = JSONValue.from(any: data)?.objectValue
+        else {
+            return nil
+        }
+        return try? JSONValue.decode(type, from: object)
     }
 }
 

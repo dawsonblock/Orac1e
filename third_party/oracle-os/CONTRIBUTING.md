@@ -42,7 +42,7 @@ swift build
 Requirements:
 
 - macOS 14+
-- Swift 5.9+ (install via [swiftly](https://github.com/swiftlang/swiftly))
+- Swift 6.x (install via [swiftly](https://github.com/swiftlang/swiftly))
 - Accessibility permission for your terminal app
 - Screen Recording permission (optional, for screenshots)
 
@@ -126,7 +126,7 @@ Recipes are JSON files stored in `~/.oracle-os/recipes/`. Here's the structure:
 
 ## Code Style
 
-- Swift 6.2 with strict concurrency
+- Swift 6 with strict concurrency
 - All logging to stderr (stdout is the MCP protocol channel)
 - No force unwraps except in tests
 - Functions over 80 lines get split

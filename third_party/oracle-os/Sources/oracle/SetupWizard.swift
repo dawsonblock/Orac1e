@@ -207,20 +207,19 @@ struct SetupWizard {
         }
 
         // Check if already configured (read config file directly — claude mcp list hangs)
-        let configPath = NSHomeDirectory() + "/.claude.json"
-        if let data = FileManager.default.contents(atPath: configPath),
-           let config = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let mcpServers = config["mcpServers"] as? [String: Any],
-           mcpServers["oracle-os"] != nil
+        let configURL = URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent(".claude.json", isDirectory: false)
+        if let config = try? ClaudeConfigStore.loadIfPresent(from: configURL),
+           config.server(named: "oracle-os") != nil
         {
             printOK("Already configured")
             return
         }
 
         // Write config directly — claude mcp add also hangs
-        var config: [String: Any] = [:]
-        if let data = FileManager.default.contents(atPath: configPath) {
-            guard let existing = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        let config: ClaudeConfig
+        if FileManager.default.fileExists(atPath: configURL.path) {
+            guard let existing = try? ClaudeConfigStore.load(from: configURL) else {
                 print("  WARNING: ~/.claude.json contains non-standard JSON.")
                 print("  Please add Oracle OS manually:")
                 print("    claude mcp add oracle-os \(binaryPath) -- mcp")
@@ -228,19 +227,17 @@ struct SetupWizard {
                 return
             }
             config = existing
+        } else {
+            config = ClaudeConfig()
         }
 
-        var mcpServers = config["mcpServers"] as? [String: Any] ?? [:]
-        mcpServers["oracle-os"] = [
-            "type": "stdio",
-            "command": binaryPath,
-            "args": ["mcp"],
-        ]
-        config["mcpServers"] = mcpServers
+        let updatedConfig = config.withServer(
+            named: "oracle-os",
+            server: ClaudeMCPServer(type: "stdio", command: binaryPath, args: ["mcp"])
+        )
 
         do {
-            let jsonData = try JSONSerialization.data(withJSONObject: config, options: [.prettyPrinted, .sortedKeys])
-            try jsonData.write(to: URL(fileURLWithPath: configPath))
+            try ClaudeConfigStore.save(updatedConfig, to: configURL)
             print("  MCP server: \(binaryPath)")
         } catch {
             print("  Could not write MCP config. Run this command manually:")
@@ -250,29 +247,23 @@ struct SetupWizard {
 
         // Add tool permissions to ~/.claude/settings.json so all oracle-os
         // MCP tools are auto-approved globally (no per-session prompts).
-        let settingsPath = NSHomeDirectory() + "/.claude/settings.json"
-        var settings: [String: Any] = [:]
-        if let data = FileManager.default.contents(atPath: settingsPath) {
-            if let existing = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+        let settingsURL = URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent(".claude/settings.json", isDirectory: false)
+        var settings = ClaudeConfig()
+        if FileManager.default.fileExists(atPath: settingsURL.path) {
+            if let existing = try? ClaudeConfigStore.load(from: settingsURL) {
                 settings = existing
             }
             // If parsing fails, settings stays empty — we'll create a fresh one.
             // settings.json is machine-generated so non-standard JSON is unlikely.
         }
 
-        var allowedTools = settings["allowedTools"] as? [String] ?? []
         let oraclePermission = "mcp__oracle-os__*"
-        if !allowedTools.contains(oraclePermission) {
-            allowedTools.append(oraclePermission)
-            settings["allowedTools"] = allowedTools
+        if settings.allowedTools?.contains(oraclePermission) != true {
+            settings = settings.withAllowedTool(oraclePermission)
 
             do {
-                try FileManager.default.createDirectory(
-                    atPath: NSHomeDirectory() + "/.claude",
-                    withIntermediateDirectories: true
-                )
-                let jsonData = try JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted, .sortedKeys])
-                try jsonData.write(to: URL(fileURLWithPath: settingsPath))
+                try ClaudeConfigStore.save(settings, to: settingsURL)
                 print("  Tool permissions: auto-approved")
             } catch {
                 print("  Could not set tool permissions automatically.")

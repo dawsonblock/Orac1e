@@ -34,9 +34,6 @@ public final class ParallelRunner: @unchecked Sendable {
                         workspaceRoot: workspaceRoot,
                         experimentsRoot: experimentsRoot
                     )
-                    try sandbox.apply(candidate)
-
-                    var results: [CommandResult] = []
                     let buildTool = BuildToolDetector.detect(at: URL(fileURLWithPath: sandbox.sandboxPath, isDirectory: true))
                     let buildCommand = spec.buildCommand.map {
                         CommandSpec(
@@ -69,35 +66,64 @@ public final class ParallelRunner: @unchecked Sendable {
                         workspaceRoot: URL(fileURLWithPath: sandbox.sandboxPath, isDirectory: true)
                     )
 
-                    if let buildCommand {
-                        results.append(try workspaceRunner.execute(spec: buildCommand))
-                    }
-                    if results.allSatisfy(\.succeeded), let testCommand {
-                        results.append(try workspaceRunner.execute(spec: testCommand))
-                    }
+                    let executedCommands = [buildCommand, testCommand]
+                        .compactMap { $0 }
+                        .map {
+                            ExperimentExecutedCommand(
+                                category: $0.category.rawValue,
+                                executable: $0.executable,
+                                arguments: $0.arguments,
+                                workspaceRoot: $0.workspaceRoot,
+                                summary: $0.summary
+                            )
+                        }
 
-                    let diffSummary = sandbox.diffSummary()
-                    let candidateSnapshot = repositoryIndexer.indexIfNeeded(
-                        workspaceRoot: URL(fileURLWithPath: sandbox.sandboxPath, isDirectory: true)
-                    )
-                    let architectureReview = architectureEngine.reviewCandidatePatch(
-                        goalDescription: spec.goalDescription,
-                        snapshot: candidateSnapshot,
-                        candidate: candidate,
-                        diffSummary: diffSummary
-                    )
-                    let effectiveArchitectureRisk = max(architectureRiskScore, architectureReview.riskScore)
+                    do {
+                        try sandbox.apply(candidate)
 
-                    return ExperimentResult(
-                        experimentID: spec.id,
-                        candidate: candidate,
-                        sandboxPath: sandbox.sandboxPath,
-                        commandResults: results,
-                        diffSummary: diffSummary,
-                        architectureRiskScore: effectiveArchitectureRisk,
-                        architectureFindings: architectureReview.findings,
-                        refactorProposalID: architectureReview.refactorProposal?.id
-                    )
+                        var results: [CommandResult] = []
+                        if let buildCommand {
+                            results.append(try workspaceRunner.execute(spec: buildCommand))
+                        }
+                        if results.allSatisfy(\.succeeded), let testCommand {
+                            results.append(try workspaceRunner.execute(spec: testCommand))
+                        }
+
+                        let diffSummary = sandbox.diffSummary()
+                        let candidateSnapshot = repositoryIndexer.indexIfNeeded(
+                            workspaceRoot: URL(fileURLWithPath: sandbox.sandboxPath, isDirectory: true)
+                        )
+                        let architectureReview = architectureEngine.reviewCandidatePatch(
+                            goalDescription: spec.goalDescription,
+                            snapshot: candidateSnapshot,
+                            candidate: candidate,
+                            diffSummary: diffSummary
+                        )
+                        let effectiveArchitectureRisk = max(architectureRiskScore, architectureReview.riskScore)
+                        let cleanupOutcome = sandbox.cleanup()
+
+                        return ExperimentResult(
+                            experimentID: spec.id,
+                            candidate: candidate,
+                            sandboxPath: sandbox.sandboxPath,
+                            commandResults: results,
+                            diffSummary: diffSummary,
+                            architectureRiskScore: effectiveArchitectureRisk,
+                            architectureFindings: architectureReview.findings,
+                            refactorProposalID: architectureReview.refactorProposal?.id,
+                            isolationMetadata: ExperimentIsolationMetadata(
+                                canonicalWorkspaceRoot: sandbox.canonicalWorkspaceRoot,
+                                sandboxRoot: sandbox.experimentsRoot,
+                                resolvedSandboxRoot: sandbox.canonicalSandboxPath,
+                                candidatePaths: [candidate.workspaceRelativePath],
+                                executedCommands: executedCommands,
+                                cleanupOutcome: cleanupOutcome
+                            )
+                        )
+                    } catch {
+                        _ = sandbox.cleanup()
+                        throw error
+                    }
                 }
             }
 

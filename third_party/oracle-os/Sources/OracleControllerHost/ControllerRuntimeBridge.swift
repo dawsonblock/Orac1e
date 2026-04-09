@@ -16,6 +16,7 @@ final class ControllerRuntimeBridge {
     let runtimeLifecycle: RuntimeLifecycle
     let diagnosticsBuilder: RuntimeDiagnosticsBuilder
     let codingRuntime: OracleCodingRuntime
+    let resultMapper: ControllerRuntimeResultMapper
 
     init() {
         self.traceRecorder = TraceRecorder()
@@ -41,6 +42,7 @@ final class ControllerRuntimeBridge {
         self.codingRuntime = OracleCodingRuntime()
         self.sessionID = traceRecorder.sessionID
         self.sessionStartedAt = Date()
+        self.resultMapper = ControllerRuntimeResultMapper(sessionID: traceRecorder.sessionID)
         self.runtimeLifecycle.startControllerHeartbeat(sessionID: sessionID)
     }
 
@@ -62,7 +64,7 @@ final class ControllerRuntimeBridge {
 
     func healthStatus() -> HealthStatus {
         let claudeConfig = loadClaudeConfig()
-        let claudeConfigured = (claudeConfig?["mcpServers"] as? [String: Any])?["oracle-os"] != nil
+        let claudeConfigured = claudeConfig?.server(named: "oracle-os") != nil
         let health = VisionBridge.healthCheck()
         let permissions = [
             PermissionStatus(
@@ -463,68 +465,19 @@ final class ControllerRuntimeBridge {
     }
 
     private func mapActionResult(request: ActionRequest, result: ToolResult) -> ActionRunResult {
-        let actionData = result.data?["action_result"] as? [String: Any]
-        let traceData = result.data?["trace"] as? [String: Any]
-        let codeData = result.data?["code_execution"] as? [String: Any]
-        let method = (actionData?["method"] as? String) ?? (result.data?["method"] as? String)
         let observation = ObservationBuilder.capture(appName: request.appName)
-        let elapsedMs = (actionData?["elapsed_ms"] as? Double)
-            ?? Double(actionData?["elapsed_ms"] as? Int ?? 0)
-
-        return ActionRunResult(
+        return resultMapper.mapActionResult(
             request: request,
-            success: actionData?["success"] as? Bool ?? result.success,
-            verified: actionData?["verified"] as? Bool ?? result.success,
-            message: (actionData?["message"] as? String) ?? result.error ?? result.suggestion,
-            failureClass: actionData?["failure_class"] as? String,
-            method: method,
-            elapsedMs: elapsedMs,
-            traceSessionID: traceData?["session_id"] as? String,
-            traceStepID: traceData?["step_id"] as? Int,
-            resultingObservation: map(observation),
-            approvalRequestID: actionData?["approval_request_id"] as? String ?? result.data?["approval_request_id"] as? String,
-            approvalStatus: actionData?["approval_status"] as? String ?? result.data?["approval_status"] as? String,
-            protectedOperation: actionData?["protected_operation"] as? String,
-            appProtectionProfile: actionData?["app_protection_profile"] as? String,
-            blockedByPolicy: actionData?["blocked_by_policy"] as? Bool ?? false,
-            policyMode: (actionData?["policy_decision"] as? [String: Any])?["policy_mode"] as? String,
-            agentKind: traceData?["agent_kind"] as? String,
-            plannerFamily: traceData?["planner_family"] as? String,
-            commandCategory: codeData?["command_category"] as? String ?? traceData?["command_category"] as? String,
-            commandSummary: codeData?["summary"] as? String ?? traceData?["command_summary"] as? String,
-            workspaceRelativePath: codeData?["workspace_relative_path"] as? String ?? traceData?["workspace_relative_path"] as? String,
-            buildResultSummary: codeData?["build_result_summary"] as? String,
-            testResultSummary: codeData?["test_result_summary"] as? String,
-            patchID: codeData?["patch_id"] as? String
+            result: result,
+            resultingObservation: map(observation)
         )
     }
 
     private func mapRecipeRunResult(recipeName: String, totalStepsFallback: Int, result: ToolResult) -> RecipeRunResultDocument {
-        let data = result.data ?? [:]
-        let stepsCompleted = data["steps_completed"] as? Int ?? 0
-        let totalSteps = data["total_steps"] as? Int ?? totalStepsFallback
-        let stepResults = (data["step_results"] as? [[String: Any]] ?? []).map { stepData in
-            RecipeRunStepResult(
-                id: stepData["step"] as? Int ?? 0,
-                action: stepData["action"] as? String ?? "step",
-                success: stepData["success"] as? Bool ?? false,
-                durationMs: stepData["duration_ms"] as? Int ?? 0,
-                error: stepData["error"] as? String,
-                note: stepData["note"] as? String
-            )
-        }
-
-        return RecipeRunResultDocument(
+        resultMapper.mapRecipeRunResult(
             recipeName: recipeName,
-            success: result.success,
-            stepsCompleted: stepsCompleted,
-            totalSteps: totalSteps,
-            error: result.error,
-            traceSessionID: sessionID,
-            stepResults: stepResults,
-            paused: (data["pending_approval"] as? Bool) == true,
-            pendingApprovalRequestID: data["approval_request_id"] as? String,
-            resumeToken: data["resume_token"] as? String
+            totalStepsFallback: totalStepsFallback,
+            result: result
         )
     }
 
@@ -547,17 +500,10 @@ final class ControllerRuntimeBridge {
         )
     }
 
-    private func loadClaudeConfig() -> [String: Any]? {
-        let configPath = NSHomeDirectory() + "/.claude.json"
-        guard let data = FileManager.default.contents(atPath: configPath) else {
-            return nil
-        }
-        guard let object = try? JSONSerialization.jsonObject(with: data),
-              let dictionary = object as? [String: Any]
-        else {
-            return nil
-        }
-        return dictionary
+    private func loadClaudeConfig() -> ClaudeConfig? {
+        let configURL = URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent(".claude.json", isDirectory: false)
+        return try? ClaudeConfigStore.loadIfPresent(from: configURL)
     }
 
     private func map(_ observation: Observation) -> ObservationSnapshot {
