@@ -108,7 +108,8 @@ memoryStore: UnifiedMemoryStore?
                 architectureFindings: result.architectureFindings,
                 refactorProposalID: result.refactorProposalID,
                 selected: index == 0,
-                promptDiagnostics: result.promptDiagnostics
+                promptDiagnostics: result.promptDiagnostics,
+                isolationMetadata: result.isolationMetadata
             )
         }
     }

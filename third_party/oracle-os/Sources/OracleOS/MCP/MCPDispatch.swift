@@ -5,6 +5,41 @@
 
 import Foundation
 
+private struct RecipeParamSummary: Encodable {
+    let name: String
+    let type: String
+    let description: String
+    let required: Bool
+}
+
+private struct RecipeSummary: Encodable {
+    let name: String
+    let description: String
+    let app: String?
+    let params: [RecipeParamSummary]?
+}
+
+private struct RecipeListPayload: Encodable {
+    let recipes: [RecipeSummary]
+    let count: Int
+}
+
+private struct RecipeSavedPayload: Encodable {
+    let saved: String
+}
+
+private struct RecipeDeletedPayload: Encodable {
+    let deleted: String
+}
+
+private struct RecipeDeletedFailurePayload: Encodable {
+    let requestedName: String
+
+    enum CodingKeys: String, CodingKey {
+        case requestedName = "requested_name"
+    }
+}
+
 /// Routes MCP tool calls to the appropriate module function.
 @MainActor
 public enum MCPDispatch {
@@ -36,26 +71,28 @@ public enum MCPDispatch {
     /// Wraps every tool call in a timeout so no single tool can block
     /// the MCP server indefinitely (the #1 user-reported issue).
     public static func handle(_ params: [String: Any]) -> [String: Any] {
-        guard let toolName = params["name"] as? String else {
-            return errorContent("Missing tool name")
+        let request: MCPCallRequest
+        do {
+            request = try MCPBoundary.decodeCall(from: params)
+        } catch {
+            return MCPBoundary.errorContent(error.localizedDescription)
         }
 
-        let args = params["arguments"] as? [String: Any] ?? [:]
         let startTime = DispatchTime.now()
-        Log.info("Tool call: \(toolName)")
+        Log.info("Tool call: \(request.name)")
 
         // Run the actual tool dispatch with a hard timeout.
         // We use a DispatchWorkItem on a serial queue so the main
         // run-loop stays responsive to cancellation signals.
         let semaphore = DispatchSemaphore(value: 0)
         var response: [String: Any]?
-        let work = DispatchWorkItem { [args] in
+        let work = DispatchWorkItem {
             let result: [String: Any]
-            if toolName == "oracle_screenshot" {
-                result = handleScreenshot(args)
+            if let specialResult = handleSpecialTool(name: request.name, args: request.arguments) {
+                result = specialResult
             } else {
-                let toolResult = dispatch(tool: toolName, args: args)
-                result = formatResult(toolResult, toolName: toolName)
+                let toolResult = dispatch(tool: request.name, args: request.arguments)
+                result = formatResult(toolResult, toolName: request.name)
             }
             response = result
             semaphore.signal()
@@ -68,7 +105,7 @@ public enum MCPDispatch {
         // This pattern is intentional: we need hard timeouts to prevent
         // stuck tools from blocking the MCP server, which is the #1
         // user-reported issue.
-        let queue = DispatchQueue(label: "oracle.mcp.tool.\(toolName)")
+        let queue = DispatchQueue(label: "oracle.mcp.tool.\(request.name)")
         queue.async(execute: work)
 
         let deadline = DispatchTime.now() + toolTimeoutSeconds
@@ -79,24 +116,24 @@ public enum MCPDispatch {
 
         if waitResult == .timedOut {
             work.cancel()
-            Log.error("Tool \(toolName) TIMED OUT after \(Int(toolTimeoutSeconds))s")
-            return errorContent("Tool \(toolName) timed out after \(Int(toolTimeoutSeconds))s")
+            Log.error("Tool \(request.name) TIMED OUT after \(Int(toolTimeoutSeconds))s")
+            return MCPBoundary.errorContent("Tool \(request.name) timed out after \(Int(toolTimeoutSeconds))s")
         }
 
         if elapsed > 5000 {
-            Log.warn("Tool \(toolName) took \(Int(elapsed))ms (slow)")
+            Log.warn("Tool \(request.name) took \(Int(elapsed))ms (slow)")
         } else {
-            Log.info("Tool \(toolName) completed in \(Int(elapsed))ms")
+            Log.info("Tool \(request.name) completed in \(Int(elapsed))ms")
         }
 
-        return response ?? errorContent("Tool \(toolName) returned nil response")
+        return response ?? MCPBoundary.errorContent("Tool \(request.name) returned nil response")
     }
 
     /// Screenshot handler returns MCP image content type for inline display.
-    private static func handleScreenshot(_ args: [String: Any]) -> [String: Any] {
+    private static func handleScreenshot(_ args: MCPArguments) -> [String: Any] {
         let result = AXScanner.screenshot(
-            appName: str(args, "app"),
-            fullResolution: bool(args, "full_resolution") ?? false
+            appName: args.string("app"),
+            fullResolution: args.bool("full_resolution") ?? false
         )
 
         guard result.success,
@@ -114,108 +151,107 @@ public enum MCPDispatch {
         var caption = "Screenshot: \(width)x\(height)"
         if !windowTitle.isEmpty { caption += " - \(windowTitle)" }
 
-        return [
-            "content": [
-                [
-                    "type": "image",
-                    "data": base64,
-                    "mimeType": mimeType,
-                ] as [String: Any],
-                [
-                    "type": "text",
-                    "text": caption,
-                ] as [String: Any],
-            ] as [[String: Any]],
-            "isError": false,
-        ]
+        return MCPBoundary.encodeImageResult(base64: base64, mimeType: mimeType, caption: caption)
+    }
+
+    /// Special handlers stay visibly separate from the normal typed dispatch path.
+    /// This checkout only ships screenshot as a public MCP exception; experiment
+    /// search remains an internal bounded subsystem, not a public tool surface.
+    private static func handleSpecialTool(name: String, args: MCPArguments) -> [String: Any]? {
+        switch name {
+        case "oracle_screenshot":
+            return handleScreenshot(args)
+        default:
+            return nil
+        }
     }
 
     // MARK: - Dispatch
 
-    private static func dispatch(tool: String, args: [String: Any]) -> ToolResult {
+    private static func dispatch(tool: String, args: MCPArguments) -> ToolResult {
         switch tool {
 
         // Perception
         case "oracle_context":
-            return AXScanner.getContext(appName: str(args, "app"))
+            return AXScanner.getContext(appName: args.string("app"))
 
         case "oracle_state":
-            return AXScanner.getState(appName: str(args, "app"))
+            return AXScanner.getState(appName: args.string("app"))
 
         case "oracle_find":
             return AXScanner.findElements(
-                query: str(args, "query"),
-                role: str(args, "role"),
-                domId: str(args, "dom_id"),
-                domClass: str(args, "dom_class"),
-                identifier: str(args, "identifier"),
-                appName: str(args, "app"),
-                depth: int(args, "depth")
+                query: args.string("query"),
+                role: args.string("role"),
+                domId: args.string("dom_id"),
+                domClass: args.string("dom_class"),
+                identifier: args.string("identifier"),
+                appName: args.string("app"),
+                depth: args.int("depth")
             )
 
         case "oracle_read":
             return AXScanner.readContent(
-                appName: str(args, "app"),
-                query: str(args, "query"),
-                depth: int(args, "depth")
+                appName: args.string("app"),
+                query: args.string("query"),
+                depth: args.int("depth")
             )
 
         case "oracle_inspect":
-            guard let query = str(args, "query") else {
+            guard let query = args.string("query") else {
                 return ToolResult(success: false, error: "Missing required parameter: query")
             }
             return AXScanner.inspect(
                 query: query,
-                role: str(args, "role"),
-                domId: str(args, "dom_id"),
-                appName: str(args, "app")
+                role: args.string("role"),
+                domId: args.string("dom_id"),
+                appName: args.string("app")
             )
 
         case "oracle_element_at":
-            guard let x = double(args, "x"), let y = double(args, "y") else {
+            guard let x = args.double("x"), let y = args.double("y") else {
                 return ToolResult(success: false, error: "Missing required parameters: x, y")
             }
             return AXScanner.elementAt(x: x, y: y)
 
         case "oracle_screenshot":
             return AXScanner.screenshot(
-                appName: str(args, "app"),
-                fullResolution: bool(args, "full_resolution") ?? false
+                appName: args.string("app"),
+                fullResolution: args.bool("full_resolution") ?? false
             )
 
         // Actions
         case "oracle_click":
             return FocusManager.withFocusRestore {
                 Actions.click(
-                    query: str(args, "query"),
-                    role: str(args, "role"),
-                    domId: str(args, "dom_id"),
-                    appName: str(args, "app"),
-                    x: double(args, "x"),
-                    y: double(args, "y"),
-                    button: str(args, "button"),
-                    count: int(args, "count"),
+                    query: args.string("query"),
+                    role: args.string("role"),
+                    domId: args.string("dom_id"),
+                    appName: args.string("app"),
+                    x: args.double("x"),
+                    y: args.double("y"),
+                    button: args.string("button"),
+                    count: args.int("count"),
                     runtime: runtime,
                     surface: .mcp,
-                    approvalRequestID: str(args, "approval_request_id"),
+                    approvalRequestID: args.string("approval_request_id"),
                     toolName: tool
                 )
             }
 
         case "oracle_type":
-            guard let text = str(args, "text") else {
+            guard let text = args.string("text") else {
                 return ToolResult(success: false, error: "Missing required parameter: text")
             }
             return FocusManager.withFocusRestore {
                 Actions.typeText(
                     text: text,
-                    into: str(args, "into"),
-                    domId: str(args, "dom_id"),
-                    appName: str(args, "app"),
-                    clear: bool(args, "clear") ?? false,
+                    into: args.string("into"),
+                    domId: args.string("dom_id"),
+                    appName: args.string("app"),
+                    clear: args.bool("clear") ?? false,
                     runtime: runtime,
                     surface: .mcp,
-                    approvalRequestID: str(args, "approval_request_id"),
+                    approvalRequestID: args.string("approval_request_id"),
                     toolName: tool
                 )
             }
@@ -227,125 +263,126 @@ public enum MCPDispatch {
         // before the app processes the event (e.g. Cmd+L needs Chrome to stay
         // focused while it selects the address bar text).
         case "oracle_press":
-            guard let key = str(args, "key") else {
+            guard let key = args.string("key") else {
                 return ToolResult(success: false, error: "Missing required parameter: key")
             }
-            let modifiers = (args["modifiers"] as? [String])
+            let modifiers = args.stringArray("modifiers")
             return Actions.pressKey(
                 key: key,
                 modifiers: modifiers,
-                appName: str(args, "app"),
+                appName: args.string("app"),
                 runtime: runtime,
                 surface: .mcp,
-                approvalRequestID: str(args, "approval_request_id"),
+                approvalRequestID: args.string("approval_request_id"),
                 toolName: tool
             )
 
         case "oracle_hotkey":
-            guard let keys = args["keys"] as? [String] else {
+            guard let keys = args.stringArray("keys") else {
                 return ToolResult(success: false, error: "Missing required parameter: keys (array of strings)")
             }
             return Actions.hotkey(
                 keys: keys,
-                appName: str(args, "app"),
+                appName: args.string("app"),
                 runtime: runtime,
                 surface: .mcp,
-                approvalRequestID: str(args, "approval_request_id"),
+                approvalRequestID: args.string("approval_request_id"),
                 toolName: tool
             )
 
         case "oracle_scroll":
-            guard let direction = str(args, "direction") else {
+            guard let direction = args.string("direction") else {
                 return ToolResult(success: false, error: "Missing required parameter: direction")
             }
             return Actions.scroll(
                 direction: direction,
-                amount: int(args, "amount"),
-                appName: str(args, "app"),
-                x: double(args, "x"),
-                y: double(args, "y"),
+                amount: args.int("amount"),
+                appName: args.string("app"),
+                x: args.double("x"),
+                y: args.double("y"),
                 runtime: runtime,
                 surface: .mcp,
-                approvalRequestID: str(args, "approval_request_id"),
+                approvalRequestID: args.string("approval_request_id"),
                 toolName: tool
             )
 
         case "oracle_focus":
-            guard let app = str(args, "app") else {
+            guard let app = args.string("app") else {
                 return ToolResult(success: false, error: "Missing required parameter: app")
             }
             return Actions.focusApp(
                 appName: app,
-                windowTitle: str(args, "window"),
+                windowTitle: args.string("window"),
                 runtime: runtime,
                 surface: .mcp,
-                approvalRequestID: str(args, "approval_request_id"),
+                approvalRequestID: args.string("approval_request_id"),
                 toolName: tool
             )
 
         case "oracle_window":
-            guard let action = str(args, "action"),
-                  let app = str(args, "app")
+            guard let action = args.string("action"),
+                  let app = args.string("app")
             else {
                 return ToolResult(success: false, error: "Missing required parameters: action, app")
             }
             return Actions.manageWindow(
                 action: action,
                 appName: app,
-                windowTitle: str(args, "window"),
-                x: double(args, "x"),
-                y: double(args, "y"),
-                width: double(args, "width"),
-                height: double(args, "height"),
+                windowTitle: args.string("window"),
+                x: args.double("x"),
+                y: args.double("y"),
+                width: args.double("width"),
+                height: args.double("height"),
                 runtime: runtime,
                 surface: .mcp,
-                approvalRequestID: str(args, "approval_request_id"),
+                approvalRequestID: args.string("approval_request_id"),
                 toolName: tool
             )
 
         // Wait
         case "oracle_wait":
-            guard let condition = str(args, "condition") else {
+            guard let condition = args.string("condition") else {
                 return ToolResult(success: false, error: "Missing required parameter: condition")
             }
             return WaitManager.waitFor(
                 condition: condition,
-                value: str(args, "value"),
-                appName: str(args, "app"),
-                timeout: double(args, "timeout") ?? 10,
-                interval: double(args, "interval") ?? 0.5
+                value: args.string("value"),
+                appName: args.string("app"),
+                timeout: args.double("timeout") ?? 10,
+                interval: args.double("interval") ?? 0.5
             )
 
         // Recipes
         case "oracle_recipes":
             let recipes = RecipeStore.listRecipes()
-            let summaries: [[String: Any]] = recipes.map { recipe in
-                var summary: [String: Any] = [
-                    "name": recipe.name,
-                    "description": recipe.description,
-                ]
-                if let app = recipe.app { summary["app"] = app }
-                if let params = recipe.params {
-                    summary["params"] = params.map { key, param in
-                        ["name": key, "type": param.type, "description": param.description,
-                         "required": param.required ?? false] as [String: Any]
-                    }
-                }
-                return summary
+            let summaries = recipes.map { recipe in
+                RecipeSummary(
+                    name: recipe.name,
+                    description: recipe.description,
+                    app: recipe.app,
+                    params: recipe.params?.map { key, param in
+                        RecipeParamSummary(
+                            name: key,
+                            type: param.type,
+                            description: param.description,
+                            required: param.required ?? false
+                        )
+                    }.sorted { $0.name < $1.name }
+                )
             }
-            return ToolResult(success: true, data: ["recipes": summaries, "count": summaries.count])
+            return MCPBoundary.makeToolResult(payload: RecipeListPayload(recipes: summaries, count: summaries.count))
 
         case "oracle_run":
-            if let resumeToken = str(args, "resume_token") {
+            if let resumeToken = args.string("resume_token") {
                 return RecipeEngine.resume(
                     resumeToken: resumeToken,
-                    approvalRequestID: str(args, "approval_request_id"),
+                    approvalRequestID: args.string("approval_request_id"),
                     runtime: runtime,
                     taskID: traceRecorder.sessionID
                 )
             }
 
-            guard let recipeName = str(args, "recipe") else {
+            guard let recipeName = args.string("recipe") else {
                 return ToolResult(success: false, error: "Missing required parameter: recipe or resume_token")
             }
             guard let recipe = RecipeStore.loadRecipe(named: recipeName) else {
@@ -356,14 +393,7 @@ public enum MCPDispatch {
                 )
             }
             // Parse params from the MCP arguments
-            let recipeParams: [String: String]
-            if let paramsObj = args["params"] as? [String: Any] {
-                recipeParams = paramsObj.reduce(into: [:]) { result, pair in
-                    result[pair.key] = "\(pair.value)"
-                }
-            } else {
-                recipeParams = [:]
-            }
+            let recipeParams = args.stringDictionary("params") ?? [:]
 
             return RecipeEngine.run(
                 recipe: recipe,
@@ -373,7 +403,7 @@ public enum MCPDispatch {
             )
 
         case "oracle_recipe_show":
-            guard let name = str(args, "name") else {
+            guard let name = args.string("name") else {
                 return ToolResult(success: false, error: "Missing required parameter: name")
             }
             guard let recipe = RecipeStore.loadRecipe(named: name) else {
@@ -383,59 +413,48 @@ public enum MCPDispatch {
                     suggestion: "Use oracle_recipes to list available recipes"
                 )
             }
-            if let data = try? JSONEncoder().encode(recipe),
-               let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-            {
-                return ToolResult(success: true, data: dict)
-            }
-            return ToolResult(success: false, error: "Failed to serialize recipe")
+            return MCPBoundary.makeToolResult(payload: recipe)
 
         case "oracle_recipe_save":
-            guard let jsonStr = str(args, "recipe_json") else {
+            guard let jsonStr = args.string("recipe_json") else {
                 return ToolResult(success: false, error: "Missing required parameter: recipe_json")
             }
             do {
                 let name = try RecipeStore.saveRecipeJSON(jsonStr)
-                return ToolResult(success: true, data: ["saved": name])
+                return MCPBoundary.makeToolResult(payload: RecipeSavedPayload(saved: name))
             } catch {
                 return ToolResult(success: false, error: "Failed to save recipe: \(error)")
             }
 
         case "oracle_recipe_delete":
-            guard let name = str(args, "name") else {
+            guard let name = args.string("name") else {
                 return ToolResult(success: false, error: "Missing required parameter: name")
             }
             let deleted = RecipeStore.deleteRecipe(named: name)
-            return ToolResult(
-                success: deleted,
-                data: deleted ? ["deleted": name] : nil,
-                error: deleted ? nil : "Recipe '\(name)' not found"
+            if deleted {
+                return MCPBoundary.makeToolResult(payload: RecipeDeletedPayload(deleted: name))
+            }
+            return MCPBoundary.makeToolResult(
+                success: false,
+                payload: RecipeDeletedFailurePayload(requestedName: name),
+                error: "Recipe '\(name)' not found"
             )
 
         // Vision
         case "oracle_parse_screen":
             return VisionScanner.parseScreen(
-                appName: str(args, "app"),
-                fullResolution: bool(args, "full_resolution") ?? false
+                appName: args.string("app"),
+                fullResolution: args.bool("full_resolution") ?? false
             )
 
         case "oracle_ground":
-            guard let description = str(args, "description") else {
+            guard let description = args.string("description") else {
                 return ToolResult(success: false, error: "Missing required parameter: description")
             }
-            let cropBox: [Double]?
-            if let arr = args["crop_box"] as? [Any] {
-                cropBox = arr.compactMap { val -> Double? in
-                    if let d = val as? Double { return d }
-                    if let i = val as? Int { return Double(i) }
-                    return nil
-                }
-            } else {
-                cropBox = nil
-            }
+            let cropBox = args.numberArray("crop_box")
             return VisionScanner.groundElement(
                 description: description,
-                appName: str(args, "app"),
+                appName: args.string("app"),
                 cropBox: cropBox
             )
 
@@ -448,51 +467,10 @@ public enum MCPDispatch {
 
     /// Format a ToolResult as MCP content array.
     private static func formatResult(_ result: ToolResult, toolName: String) -> [String: Any] {
-        let dict = result.toDict()
-
-        // Serialize to JSON string for MCP text content
-        if let data = try? JSONSerialization.data(withJSONObject: dict, options: [.sortedKeys]),
-           let jsonStr = String(data: data, encoding: .utf8)
-        {
-            return [
-                "content": [
-                    ["type": "text", "text": jsonStr],
-                ],
-                "isError": !result.success,
-            ]
-        }
-
-        return errorContent("Failed to serialize response for \(toolName)")
+        MCPBoundary.encodeResult(result, toolName: toolName)
     }
 
     static func errorContent(_ message: String) -> [String: Any] {
-        [
-            "content": [
-                ["type": "text", "text": "{\"success\":false,\"error\":\"\(message)\"}"],
-            ],
-            "isError": true,
-        ]
-    }
-
-    // MARK: - Parameter Helpers
-
-    private static func str(_ args: [String: Any], _ key: String) -> String? {
-        args[key] as? String
-    }
-
-    private static func int(_ args: [String: Any], _ key: String) -> Int? {
-        if let i = args[key] as? Int { return i }
-        if let d = args[key] as? Double { return Int(d) }
-        return nil
-    }
-
-    private static func double(_ args: [String: Any], _ key: String) -> Double? {
-        if let d = args[key] as? Double { return d }
-        if let i = args[key] as? Int { return Double(i) }
-        return nil
-    }
-
-    private static func bool(_ args: [String: Any], _ key: String) -> Bool? {
-        args[key] as? Bool
+        MCPBoundary.errorContent(message)
     }
 }

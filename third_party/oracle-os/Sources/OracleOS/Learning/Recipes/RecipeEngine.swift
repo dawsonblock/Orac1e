@@ -184,18 +184,20 @@ public enum RecipeEngine {
                 )
 
                 let totalDuration = Int(Date().timeIntervalSince(startTime) * 1000)
-                var data = result.data ?? [:]
-                data["recipe"] = recipe.name
-                data["steps_completed"] = stepResults.count
-                data["total_steps"] = recipe.steps.count
-                data["duration_ms"] = totalDuration
-                data["step_results"] = stepResults.map { stepResultDict($0) }
-                data["pending_approval"] = true
-                data["resume_token"] = token
+                let payload = RecipeRunBoundaryResult(
+                    recipe: recipe.name,
+                    stepsCompleted: stepResults.count,
+                    totalSteps: recipe.steps.count,
+                    durationMs: totalDuration,
+                    pendingApproval: true,
+                    approvalRequestID: result.data?["approval_request_id"] as? String,
+                    resumeToken: token,
+                    stepResults: stepResults.map(stepResultPayload)
+                )
 
-                return ToolResult(
+                return makeRecipeToolResult(
                     success: false,
-                    data: data,
+                    payload: payload,
                     error: result.error ?? "Recipe paused pending approval",
                     suggestion: "Approve the pending action in Oracle Controller, then resume this recipe with the provided resume token and approval request id."
                 )
@@ -220,31 +222,27 @@ public enum RecipeEngine {
                 }
 
                 let totalDuration = Int(Date().timeIntervalSince(startTime) * 1000)
-                var failureData: [String: Any] = [
-                    "recipe": recipe.name,
-                    "failed_step": step.id,
-                    "failed_action": step.action,
-                    "error": result.error ?? "Unknown error",
-                    "steps_completed": max(0, stepResults.count - 1),
-                    "total_steps": recipe.steps.count,
-                    "duration_ms": totalDuration,
-                    "step_results": stepResults.map { stepResultDict($0) },
-                ]
-
+                var currentContext: [String: JSONValue]?
                 if let app = recipe.app {
                     let context = AXScanner.getContext(appName: app)
-                    if let contextData = context.data {
-                        failureData["current_context"] = contextData
-                    }
+                    currentContext = context.data.flatMap { JSONValue.from(any: $0)?.objectValue }
                 }
 
-                if let note = step.note {
-                    failureData["failed_note"] = note
-                }
+                let payload = RecipeRunBoundaryResult(
+                    recipe: recipe.name,
+                    stepsCompleted: max(0, stepResults.count - 1),
+                    totalSteps: recipe.steps.count,
+                    durationMs: totalDuration,
+                    failedStep: step.id,
+                    failedAction: step.action,
+                    failedNote: step.note,
+                    currentContext: currentContext,
+                    stepResults: stepResults.map(stepResultPayload)
+                )
 
-                return ToolResult(
+                return makeRecipeToolResult(
                     success: false,
-                    data: failureData,
+                    payload: payload,
                     error: "Recipe '\(recipe.name)' failed at step \(step.id) (\(step.note ?? step.action)): \(result.error ?? "")",
                     suggestion: "Check the current_context and failed_step details. Use oracle_screenshot for visual debugging."
                 )
@@ -255,17 +253,16 @@ public enum RecipeEngine {
                 let waitResult = handleWaitAfter(resolvedWaitAfter, appName: recipe.app)
                 if !waitResult.success {
                     let totalDuration = Int(Date().timeIntervalSince(startTime) * 1000)
-                    return ToolResult(
+                    return makeRecipeToolResult(
                         success: false,
-                        data: [
-                            "recipe": recipe.name,
-                            "failed_step": step.id,
-                            "error": "Action succeeded but expected state didn't materialize: \(waitResult.error ?? "")",
-                            "steps_completed": stepResults.count,
-                            "total_steps": recipe.steps.count,
-                            "duration_ms": totalDuration,
-                            "step_results": stepResults.map { stepResultDict($0) },
-                        ],
+                        payload: RecipeRunBoundaryResult(
+                            recipe: recipe.name,
+                            stepsCompleted: stepResults.count,
+                            totalSteps: recipe.steps.count,
+                            durationMs: totalDuration,
+                            failedStep: step.id,
+                            stepResults: stepResults.map(stepResultPayload)
+                        ),
                         error: "Recipe '\(recipe.name)' step \(step.id) wait_after failed: \(waitResult.error ?? "")",
                         suggestion: "The action succeeded but the expected result didn't appear. Use oracle_context and oracle_screenshot to diagnose."
                     )
@@ -277,15 +274,15 @@ public enum RecipeEngine {
 
         let totalDuration = Int(Date().timeIntervalSince(startTime) * 1000)
 
-        return ToolResult(
+        return makeRecipeToolResult(
             success: true,
-            data: [
-                "recipe": recipe.name,
-                "steps_completed": stepResults.count,
-                "total_steps": recipe.steps.count,
-                "duration_ms": totalDuration,
-                "step_results": stepResults.map { stepResultDict($0) },
-            ]
+            payload: RecipeRunBoundaryResult(
+                recipe: recipe.name,
+                stepsCompleted: stepResults.count,
+                totalSteps: recipe.steps.count,
+                durationMs: totalDuration,
+                stepResults: stepResults.map(stepResultPayload)
+            )
         )
     }
 
@@ -597,16 +594,28 @@ public enum RecipeEngine {
 
     // MARK: - Result Formatting
 
-    private static func stepResultDict(_ result: RecipeStepResult) -> [String: Any] {
-        var dict: [String: Any] = [
-            "step": result.stepId,
-            "action": result.action,
-            "success": result.success,
-            "duration_ms": result.durationMs,
-        ]
-        if let error = result.error { dict["error"] = error }
-        if let note = result.note { dict["note"] = note }
-        return dict
+    private static func stepResultPayload(_ result: RecipeStepResult) -> RecipeStepBoundaryResult {
+        RecipeStepBoundaryResult(
+            step: result.stepId,
+            action: result.action,
+            success: result.success,
+            durationMs: result.durationMs,
+            error: result.error,
+            note: result.note
+        )
+    }
+
+    private static func makeRecipeToolResult(
+        success: Bool,
+        payload: RecipeRunBoundaryResult,
+        error: String? = nil,
+        suggestion: String? = nil
+    ) -> ToolResult {
+        do {
+            return try ToolResult(success: success, payload: payload, error: error, suggestion: suggestion)
+        } catch {
+            return ToolResult(success: false, error: "Failed to encode recipe result")
+        }
     }
 
     private static func isPendingApproval(_ result: ToolResult) -> Bool {

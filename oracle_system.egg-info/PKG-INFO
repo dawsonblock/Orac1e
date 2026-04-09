@@ -1,0 +1,14 @@
+Metadata-Version: 2.4
+Name: oracle-system
+Version: 0.1.0
+Summary: Oracle Build v5 — integration layer and control-plane services
+Requires-Python: >=3.11
+License-File: LICENSE
+Requires-Dist: fastapi
+Requires-Dist: uvicorn
+Requires-Dist: pydantic
+Requires-Dist: pytest
+Requires-Dist: redis
+Requires-Dist: rq
+Requires-Dist: gitpython
+Dynamic: license-file
