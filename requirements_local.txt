@@ -60,7 +60,7 @@ jsonschema==4.26.0
 jsonschema-specifications==2025.9.1
 kiwisolver==1.5.0
 lightning_sdk==2026.3.17.post0
-litellm==1.82.6
+litellm==1.84.0
 litserve==0.2.17
 lxml==6.0.2
 markdown-it-py==4.0.0
@@ -216,7 +216,7 @@ jsonschema==4.26.0
 jsonschema-specifications==2025.9.1
 kiwisolver==1.5.0
 lightning_sdk==2026.3.17.post0
-litellm==1.82.6
+litellm==1.84.0
 litserve==0.2.17
 lxml==6.0.2
 markdown-it-py==4.0.0
