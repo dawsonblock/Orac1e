@@ -1,0 +1,7 @@
+flask>=3.0.0
+pillow>=10.2.0
+mlx>=0.17.3
+mlx_vlm>=0.0.12
+transformers>=4.38.2
+pytesseract>=0.3.10
+ultralytics>=8.2.0

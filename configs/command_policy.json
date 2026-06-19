@@ -1,0 +1,17 @@
+{
+  "allow_prefixes": [
+    "pytest",
+    "python -m compileall",
+    "ruff",
+    "swift test",
+    "swift build"
+  ],
+  "deny_prefixes": [
+    "pip install",
+    "brew install",
+    "curl ",
+    "wget ",
+    "rm -rf",
+    "git push"
+  ]
+}

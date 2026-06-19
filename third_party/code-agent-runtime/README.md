@@ -1,0 +1,69 @@
+# Code Agent Runtime
+
+A bounded Python-first code agent with three layers:
+
+- a local execution pipeline that edits only an isolated worktree
+- optional GitHub App publishing for checks, comments, draft PRs, and branch-protection inspection
+- optional Docker sandbox execution with language-aware image selection
+
+It is still intentionally narrow.
+
+## What it does
+
+1. ingest a GitHub issue payload or local issue task
+2. create or use an isolated git worktree
+3. localize likely files
+4. search across a bounded number of candidate files for a valid patch
+5. run patch preflight, syntax validation, and broader targeted pytest selection
+6. emit a draft-PR artifact locally or open a real draft PR through a GitHub App
+7. run batch evaluations from a SWE-bench-style JSONL manifest
+
+## Safety boundary
+
+- no autonomous merge
+- no direct default-branch push
+- no writing outside the managed worktree
+- no reflection-driven live repo writes
+- no network access inside the Docker sandbox by default
+- no production secrets inside the workspace
+
+## What is implemented
+
+- canonical schemas and append-only SQLite event store
+- safe repo cache and git worktree manager
+- GitHub webhook normalization and issue parsing
+- minimal planner with explicit file localization heuristics
+- bounded patch builder using explicit `File`, `Replace`, and `With` instructions
+- multi-attempt candidate search across ranked files
+- patch guard and diff summarizer
+- validation ladder: preflight, syntax, broader targeted pytest selection
+- local reporter that writes draft-PR or comment artifacts
+- GitHub App auth, checks, issue comments, draft PR wiring, and branch protection inspection
+- Docker command runner with `--network none`
+- language-aware sandbox image policy for Python, JS/TS, and Rust repos
+- SWE-bench-style local harness and manifest runner
+- unit and integration tests
+
+## What is still missing
+
+- full semantic program repair across large repos
+- hermetic build reproduction for arbitrary dependency graphs
+- live GitHub App verification from this environment
+- true production hardening for secrets, quotas, and fleet-scale scheduling
+## Added in this build
+
+- richer issue parsing: stack-trace file extraction, ignore lists, search terms, symbols, and per-issue attempt/file caps
+- improved localization and ranking using issue tokens, content hints, symbol matches, and ignore rules
+- richer bounded patch strategies: insert-before, insert-after, append-text, and function-scoped Python return rewrites
+- stricter patch guardrails for oversized diffs, assertion-only removals, and lockfile-like path changes
+- more unit coverage for parser, localizer, planner, patch builder, and patch guard upgrades
+
+
+
+## New in 0.7.0
+
+- repo profiles from `pyproject.toml` or `.agent/runtime.yaml`
+- command overrides per language
+- custom test roots and ignore paths
+- flaky-aware retry for targeted and full test runs
+- richer attempt summaries with validation commands and dependency snapshots

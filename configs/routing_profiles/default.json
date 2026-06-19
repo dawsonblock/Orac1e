@@ -1,0 +1,4 @@
+{
+  "interactive_worker": "aider",
+  "autonomous_worker": "hardened"
+}

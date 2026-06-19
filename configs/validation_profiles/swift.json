@@ -1,0 +1,26 @@
+{
+  "profile": "swift",
+  "language": "swift",
+  "commands": [
+    "swift build",
+    "swift test"
+  ],
+  "stages": [
+    {
+      "id": "build",
+      "name": "Build",
+      "commands": [
+        "swift build"
+      ],
+      "haltOnFailure": true
+    },
+    {
+      "id": "tests",
+      "name": "Tests",
+      "commands": [
+        "swift test"
+      ],
+      "haltOnFailure": true
+    }
+  ]
+}

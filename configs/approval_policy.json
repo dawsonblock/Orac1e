@@ -1,0 +1,4 @@
+{
+  "require_apply_approval": true,
+  "allow_auto_approve_in_test_mode": true
+}

@@ -1,0 +1,22 @@
+{
+  "profile": "javascript",
+  "language": "javascript",
+  "description": "Validation profile for JavaScript repositories",
+  "stages": [
+    {
+      "id": "install_check",
+      "name": "Dependency manifest check",
+      "commands": ["test -f package.json"]
+    },
+    {
+      "id": "lint",
+      "name": "Lint",
+      "commands": ["npm run lint --if-present"]
+    },
+    {
+      "id": "test",
+      "name": "Tests",
+      "commands": ["npm test --if-present -- --runInBand"]
+    }
+  ]
+}

@@ -1,0 +1,494 @@
+diff -ruN /mnt/data/oracle40/Oracle-OS-main/Sources/OracleControllerHost/ControllerRuntimeBridge.swift /mnt/data/oracle40_mod/Sources/OracleControllerHost/ControllerRuntimeBridge.swift
+--- /mnt/data/oracle40/Oracle-OS-main/Sources/OracleControllerHost/ControllerRuntimeBridge.swift	2026-03-20 00:00:59.000000000 +0000
++++ /mnt/data/oracle40_mod/Sources/OracleControllerHost/ControllerRuntimeBridge.swift	2026-03-20 02:38:07.861831872 +0000
+@@ -27,7 +27,7 @@
+         )
+         self.diagnosticsBuilder = RuntimeDiagnosticsBuilder()
+         let eventStore = EventStore()
+-        let commitCoordinator = CommitCoordinator(eventStore: eventStore, reducers: [])
++        let commitCoordinator = CommitCoordinator(eventStore: eventStore, reducers: DefaultReducers.make())
+         self.oracleRuntime = RuntimeOrchestrator(
+             eventStore: eventStore,
+             commitCoordinator: commitCoordinator,
+diff -ruN /mnt/data/oracle40/Oracle-OS-main/Sources/OracleOS/MCP/MCPDispatch.swift /mnt/data/oracle40_mod/Sources/OracleOS/MCP/MCPDispatch.swift
+--- /mnt/data/oracle40/Oracle-OS-main/Sources/OracleOS/MCP/MCPDispatch.swift	2026-03-20 00:00:59.000000000 +0000
++++ /mnt/data/oracle40_mod/Sources/OracleOS/MCP/MCPDispatch.swift	2026-03-20 02:38:07.862568108 +0000
+@@ -22,7 +22,7 @@
+         artifactWriter: failureArtifactWriter
+     )
+     private static let eventStore = EventStore()
+-    private static let commitCoordinator = CommitCoordinator(eventStore: eventStore, reducers: [])
++    private static let commitCoordinator = CommitCoordinator(eventStore: eventStore, reducers: DefaultReducers.make())
+     private static let runtime = RuntimeOrchestrator(
+         eventStore: eventStore,
+         commitCoordinator: commitCoordinator,
+diff -ruN /mnt/data/oracle40/Oracle-OS-main/Sources/OracleOS/State/Reducers/DefaultReducers.swift /mnt/data/oracle40_mod/Sources/OracleOS/State/Reducers/DefaultReducers.swift
+--- /mnt/data/oracle40/Oracle-OS-main/Sources/OracleOS/State/Reducers/DefaultReducers.swift	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/oracle40_mod/Sources/OracleOS/State/Reducers/DefaultReducers.swift	2026-03-20 02:38:07.859823606 +0000
+@@ -0,0 +1,20 @@
++import Foundation
++
++public enum DefaultReducers {
++    public static func make() -> [any EventReducer] {
++        [
++            composite(),
++        ]
++    }
++
++    public static func composite() -> CompositeStateReducer {
++        CompositeStateReducer(
++            reducers: [
++                RuntimeStateReducer(),
++                UIStateReducer(),
++                ProjectStateReducer(),
++                MemoryStateReducer(),
++            ]
++        )
++    }
++}
+diff -ruN /mnt/data/oracle40/Oracle-OS-main/Sources/OracleOS/State/Reducers/MemoryStateReducer.swift /mnt/data/oracle40_mod/Sources/OracleOS/State/Reducers/MemoryStateReducer.swift
+--- /mnt/data/oracle40/Oracle-OS-main/Sources/OracleOS/State/Reducers/MemoryStateReducer.swift	2026-03-20 00:00:59.000000000 +0000
++++ /mnt/data/oracle40_mod/Sources/OracleOS/State/Reducers/MemoryStateReducer.swift	2026-03-20 02:38:07.861117048 +0000
+@@ -1,7 +1,40 @@
+ import Foundation
++
+ public struct MemoryStateReducer: EventReducer {
+     public init() {}
++
+     public func apply(events: [EventEnvelope], to state: inout WorldStateModel) {
+-        // Memory promotion tracked via learning events only — no direct state writes here
++        let snapshot = state.snapshot
++        var knowledgeSignals = snapshot.knowledgeSignals
++        var notes = snapshot.notes
++
++        for event in events {
++            let payload = ReducerSupport.dictionary(from: event)
++
++            switch event.eventType {
++            case "LessonPromoted":
++                let signal = ReducerSupport.string("signal", in: payload)
++                    ?? ReducerSupport.string("lesson", in: payload)
++                knowledgeSignals = ReducerSupport.appendUnique(knowledgeSignals, value: signal)
++
++            case "RecipeRecorded":
++                let name = ReducerSupport.string("name", in: payload) ?? "recipe recorded"
++                notes = ReducerSupport.appendUnique(notes, value: name, limit: 20)
++
++            case "TraceSaved":
++                let trace = ReducerSupport.string("traceID", in: payload) ?? "trace saved"
++                notes = ReducerSupport.appendUnique(notes, value: trace, limit: 20)
++
++            default:
++                break
++            }
++        }
++
++        state.replaceCommittedSnapshot(
++            snapshot.copy(
++                knowledgeSignals: knowledgeSignals,
++                notes: notes
++            )
++        )
+     }
+ }
+diff -ruN /mnt/data/oracle40/Oracle-OS-main/Sources/OracleOS/State/Reducers/ProjectStateReducer.swift /mnt/data/oracle40_mod/Sources/OracleOS/State/Reducers/ProjectStateReducer.swift
+--- /mnt/data/oracle40/Oracle-OS-main/Sources/OracleOS/State/Reducers/ProjectStateReducer.swift	2026-03-20 00:00:59.000000000 +0000
++++ /mnt/data/oracle40_mod/Sources/OracleOS/State/Reducers/ProjectStateReducer.swift	2026-03-20 02:38:07.860919059 +0000
+@@ -1,8 +1,74 @@
+ import Foundation
++
+ public struct ProjectStateReducer: EventReducer {
+     public init() {}
++
+     public func apply(events: [EventEnvelope], to state: inout WorldStateModel) {
+-        // Project state changes derived from events are handled by WorldStateModel
+-        _ = events
++        let snapshot = state.snapshot
++        var repositoryRoot = snapshot.repositoryRoot
++        var activeBranch = snapshot.activeBranch
++        var isGitDirty = snapshot.isGitDirty
++        var openFileCount = snapshot.openFileCount
++        var buildSucceeded = snapshot.buildSucceeded
++        var failingTestCount = snapshot.failingTestCount
++
++        for event in events {
++            let payload = ReducerSupport.dictionary(from: event)
++
++            switch event.eventType {
++            case "RepositoryObserved":
++                if let value = ReducerSupport.string("repositoryRoot", in: payload) ?? ReducerSupport.string("workspaceRoot", in: payload) {
++                    repositoryRoot = value
++                }
++                if let value = ReducerSupport.string("activeBranch", in: payload) {
++                    activeBranch = value
++                }
++                if let value = ReducerSupport.bool("isGitDirty", in: payload) {
++                    isGitDirty = value
++                }
++                if let value = ReducerSupport.int("openFileCount", in: payload) {
++                    openFileCount = value
++                }
++
++            case "FileRead":
++                if ReducerSupport.string("path", in: payload) != nil {
++                    openFileCount = max(openFileCount, 1)
++                }
++
++            case "FileModified":
++                if ReducerSupport.string("path", in: payload) != nil {
++                    isGitDirty = true
++                    openFileCount = max(openFileCount, 1)
++                }
++
++            case "BuildCompleted":
++                if let value = ReducerSupport.bool("succeeded", in: payload) ?? ReducerSupport.bool("buildSucceeded", in: payload) {
++                    buildSucceeded = value
++                } else if let status = ReducerSupport.string("status", in: payload) {
++                    buildSucceeded = (status.lowercased() == "success")
++                }
++
++            case "TestsCompleted":
++                if let value = ReducerSupport.int("failingTestCount", in: payload) {
++                    failingTestCount = value
++                } else if let succeeded = ReducerSupport.bool("succeeded", in: payload) {
++                    failingTestCount = succeeded ? 0 : failingTestCount
++                }
++
++            default:
++                break
++            }
++        }
++
++        state.replaceCommittedSnapshot(
++            snapshot.copy(
++                repositoryRoot: .some(repositoryRoot),
++                activeBranch: .some(activeBranch),
++                isGitDirty: isGitDirty,
++                openFileCount: openFileCount,
++                buildSucceeded: .some(buildSucceeded),
++                failingTestCount: .some(failingTestCount)
++            )
++        )
+     }
+ }
+diff -ruN /mnt/data/oracle40/Oracle-OS-main/Sources/OracleOS/State/Reducers/RuntimeStateReducer.swift /mnt/data/oracle40_mod/Sources/OracleOS/State/Reducers/RuntimeStateReducer.swift
+--- /mnt/data/oracle40/Oracle-OS-main/Sources/OracleOS/State/Reducers/RuntimeStateReducer.swift	2026-03-20 00:00:59.000000000 +0000
++++ /mnt/data/oracle40_mod/Sources/OracleOS/State/Reducers/RuntimeStateReducer.swift	2026-03-20 02:38:07.860089932 +0000
+@@ -1,7 +1,46 @@
+ import Foundation
++
+ public struct RuntimeStateReducer: EventReducer {
+     public init() {}
++
+     public func apply(events: [EventEnvelope], to state: inout WorldStateModel) {
+-        _ = events
++        let snapshot = state.snapshot
++        var cycleCount = snapshot.cycleCount
++        var processNames = snapshot.processNames
++        var notes = snapshot.notes
++
++        for event in events {
++            let payload = ReducerSupport.dictionary(from: event)
++
++            switch event.eventType {
++            case "CommandSucceeded", "CommandFailed":
++                cycleCount += 1
++
++            case "PolicyRejected":
++                let reason = ReducerSupport.string("reason", in: payload) ?? "policy rejected"
++                notes = ReducerSupport.appendUnique(notes, value: reason, limit: 20)
++
++            default:
++                break
++            }
++
++            if let names = ReducerSupport.stringArray("processNames", in: payload) {
++                processNames = ReducerSupport.unique(names)
++            } else if let name = ReducerSupport.string("processName", in: payload) {
++                processNames = ReducerSupport.appendUnique(processNames, value: name)
++            }
++
++            if let router = ReducerSupport.string("router", in: payload), event.eventType == "CommandFailed" {
++                notes = ReducerSupport.appendUnique(notes, value: "command failed via \(router)", limit: 20)
++            }
++        }
++
++        state.replaceCommittedSnapshot(
++            snapshot.copy(
++                cycleCount: cycleCount,
++                processNames: processNames,
++                notes: notes
++            )
++        )
+     }
+ }
+diff -ruN /mnt/data/oracle40/Oracle-OS-main/Sources/OracleOS/State/Reducers/StateReducer.swift /mnt/data/oracle40_mod/Sources/OracleOS/State/Reducers/StateReducer.swift
+--- /mnt/data/oracle40/Oracle-OS-main/Sources/OracleOS/State/Reducers/StateReducer.swift	2026-03-20 00:00:59.000000000 +0000
++++ /mnt/data/oracle40_mod/Sources/OracleOS/State/Reducers/StateReducer.swift	2026-03-20 02:38:07.859411447 +0000
+@@ -1,9 +1,108 @@
+ import Foundation
++
+ /// Composite reducer — applies all sub-reducers in order.
+ public struct CompositeStateReducer: EventReducer {
+     private let reducers: [any EventReducer]
+-    public init(reducers: [any EventReducer]) { self.reducers = reducers }
++
++    public init(reducers: [any EventReducer]) {
++        self.reducers = reducers
++    }
++
+     public func apply(events: [EventEnvelope], to state: inout WorldStateModel) {
+-        for reducer in reducers { reducer.apply(events: events, to: &state) }
++        let baseSequence = state.snapshot.lastSequenceNumber
++        let newEvents = events.filter { $0.sequenceNumber > baseSequence }
++        guard !newEvents.isEmpty else { return }
++
++        for reducer in reducers {
++            reducer.apply(events: newEvents, to: &state)
++        }
++
++        let maxSequence = newEvents.map(\.sequenceNumber).max() ?? baseSequence
++        state.replaceCommittedSnapshot(
++            state.snapshot.copy(lastSequenceNumber: maxSequence)
++        )
++    }
++}
++
++enum ReducerSupport {
++    static func dictionary(from envelope: EventEnvelope) -> [String: Any] {
++        guard !envelope.payload.isEmpty,
++              let object = try? JSONSerialization.jsonObject(with: envelope.payload),
++              let dictionary = object as? [String: Any]
++        else {
++            return [:]
++        }
++        return dictionary
++    }
++
++    static func string(_ key: String, in payload: [String: Any]) -> String? {
++        payload[key] as? String
++    }
++
++    static func bool(_ key: String, in payload: [String: Any]) -> Bool? {
++        if let value = payload[key] as? Bool {
++            return value
++        }
++        if let value = payload[key] as? NSNumber {
++            return value.boolValue
++        }
++        if let value = payload[key] as? String {
++            switch value.lowercased() {
++            case "true", "1", "yes": return true
++            case "false", "0", "no": return false
++            default: return nil
++            }
++        }
++        return nil
++    }
++
++    static func int(_ key: String, in payload: [String: Any]) -> Int? {
++        if let value = payload[key] as? Int {
++            return value
++        }
++        if let value = payload[key] as? NSNumber {
++            return value.intValue
++        }
++        if let value = payload[key] as? String {
++            return Int(value)
++        }
++        return nil
++    }
++
++    static func stringArray(_ key: String, in payload: [String: Any]) -> [String]? {
++        if let values = payload[key] as? [String] {
++            return values
++        }
++        if let values = payload[key] as? [Any] {
++            return values.compactMap { $0 as? String }
++        }
++        return nil
++    }
++
++    static func appendUnique(_ existing: [String], value: String?, limit: Int? = nil) -> [String] {
++        guard let value, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
++            return existing
++        }
++
++        var result = existing
++        if !result.contains(value) {
++            result.append(value)
++        }
++
++        if let limit, result.count > limit {
++            result = Array(result.suffix(limit))
++        }
++        return result
++    }
++
++    static func unique(_ values: [String]) -> [String] {
++        var seen = Set<String>()
++        var result: [String] = []
++        for value in values where !value.isEmpty {
++            if seen.insert(value).inserted {
++                result.append(value)
++            }
++        }
++        return result
+     }
+ }
+diff -ruN /mnt/data/oracle40/Oracle-OS-main/Sources/OracleOS/State/Reducers/UIStateReducer.swift /mnt/data/oracle40_mod/Sources/OracleOS/State/Reducers/UIStateReducer.swift
+--- /mnt/data/oracle40/Oracle-OS-main/Sources/OracleOS/State/Reducers/UIStateReducer.swift	2026-03-20 00:00:59.000000000 +0000
++++ /mnt/data/oracle40_mod/Sources/OracleOS/State/Reducers/UIStateReducer.swift	2026-03-20 02:38:07.860557141 +0000
+@@ -1,8 +1,74 @@
+ import Foundation
++
+ public struct UIStateReducer: EventReducer {
+     public init() {}
++
+     public func apply(events: [EventEnvelope], to state: inout WorldStateModel) {
+-        // UI state changes derived from observation events
+-        _ = events
++        let snapshot = state.snapshot
++        var activeApplication = snapshot.activeApplication
++        var windowTitle = snapshot.windowTitle
++        var url = snapshot.url
++        var visibleElementCount = snapshot.visibleElementCount
++        var modalPresent = snapshot.modalPresent
++        var observationHash = snapshot.observationHash
++
++        for event in events {
++            let payload = ReducerSupport.dictionary(from: event)
++
++            switch event.eventType {
++            case "UIObservationCaptured":
++                if let value = ReducerSupport.string("appName", in: payload) ?? ReducerSupport.string("app", in: payload) {
++                    activeApplication = value
++                }
++                if let value = ReducerSupport.string("windowTitle", in: payload) {
++                    windowTitle = value
++                }
++                if let value = ReducerSupport.string("url", in: payload) {
++                    url = value
++                }
++                if let value = ReducerSupport.int("visibleElementCount", in: payload) {
++                    visibleElementCount = value
++                }
++                if let value = ReducerSupport.bool("modalPresent", in: payload) {
++                    modalPresent = value
++                }
++                if let value = ReducerSupport.string("observationHash", in: payload) {
++                    observationHash = value
++                }
++
++            case "AppFocused":
++                activeApplication = ReducerSupport.string("appName", in: payload) ?? ReducerSupport.string("app", in: payload) ?? activeApplication
++
++            case "WindowFocused":
++                if let value = ReducerSupport.string("appName", in: payload) ?? ReducerSupport.string("app", in: payload) {
++                    activeApplication = value
++                }
++                if let value = ReducerSupport.string("windowTitle", in: payload) {
++                    windowTitle = value
++                }
++
++            case "NavigationObserved":
++                if let value = ReducerSupport.string("url", in: payload) {
++                    url = value
++                }
++                if let value = ReducerSupport.string("appName", in: payload) ?? ReducerSupport.string("app", in: payload) {
++                    activeApplication = value
++                }
++
++            default:
++                break
++            }
++        }
++
++        state.replaceCommittedSnapshot(
++            snapshot.copy(
++                activeApplication: .some(activeApplication),
++                windowTitle: .some(windowTitle),
++                url: .some(url),
++                visibleElementCount: visibleElementCount,
++                modalPresent: modalPresent,
++                observationHash: .some(observationHash)
++            )
++        )
+     }
+ }
+diff -ruN /mnt/data/oracle40/Oracle-OS-main/Sources/OracleOS/WorldModel/WorldStateModel.swift /mnt/data/oracle40_mod/Sources/OracleOS/WorldModel/WorldStateModel.swift
+--- /mnt/data/oracle40/Oracle-OS-main/Sources/OracleOS/WorldModel/WorldStateModel.swift	2026-03-20 00:00:59.000000000 +0000
++++ /mnt/data/oracle40_mod/Sources/OracleOS/WorldModel/WorldStateModel.swift	2026-03-20 02:38:07.858759227 +0000
+@@ -71,6 +71,20 @@
+         current = WorldModelSnapshot(from: worldState)
+     }
+ 
++    /// Replaces the committed snapshot directly.
++    ///
++    /// This is reserved for reducer-driven state projection after events have
++    /// already been committed to the append-only event store.
++    public func replaceCommittedSnapshot(_ snapshot: WorldModelSnapshot) {
++        lock.lock()
++        defer { lock.unlock() }
++        history.append(current)
++        if history.count > maxHistory {
++            history.removeFirst()
++        }
++        current = snapshot
++    }
++
+     /// Returns the N most recent snapshots in chronological order (oldest first).
+     public func recentHistory(limit: Int = 5) -> [WorldModelSnapshot] {
+         lock.lock()
+@@ -99,6 +113,7 @@
+     public let processNames: [String]
+     public let knowledgeSignals: [String]
+     public let notes: [String]
++    public let lastSequenceNumber: Int
+ 
+     public init(
+         timestamp: Date = Date(),
+@@ -118,7 +133,8 @@
+         observationHash: String? = nil,
+         processNames: [String] = [],
+         knowledgeSignals: [String] = [],
+-        notes: [String] = []
++        notes: [String] = [],
++        lastSequenceNumber: Int = -1
+     ) {
+         self.timestamp = timestamp
+         self.cycleCount = cycleCount
+@@ -138,6 +154,7 @@
+         self.processNames = processNames
+         self.knowledgeSignals = knowledgeSignals
+         self.notes = notes
++        self.lastSequenceNumber = lastSequenceNumber
+     }
+ 
+     public init(from worldState: WorldState) {
+@@ -173,11 +190,13 @@
+         observationHash: String?? = nil,
+         processNames: [String]? = nil,
+         knowledgeSignals: [String]? = nil,
+-        notes: [String]? = nil
++        notes: [String]? = nil,
++        cycleCount: Int? = nil,
++        lastSequenceNumber: Int? = nil
+     ) -> WorldModelSnapshot {
+         WorldModelSnapshot(
+             timestamp: Date(),
+-            cycleCount: self.cycleCount,
++            cycleCount: cycleCount ?? self.cycleCount,
+             activeApplication: activeApplication ?? self.activeApplication,
+             windowTitle: windowTitle ?? self.windowTitle,
+             url: url ?? self.url,
+@@ -193,7 +212,8 @@
+             observationHash: observationHash ?? self.observationHash,
+             processNames: processNames ?? self.processNames,
+             knowledgeSignals: knowledgeSignals ?? self.knowledgeSignals,
+-            notes: notes ?? self.notes
++            notes: notes ?? self.notes,
++            lastSequenceNumber: lastSequenceNumber ?? self.lastSequenceNumber
+         )
+     }
+ }

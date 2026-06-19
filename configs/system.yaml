@@ -1,0 +1,18 @@
+# Oracle Build — System Configuration
+# Controls which services are enabled and how they behave.
+# Preflight checks honour these flags: a service that is enabled=true
+# will raise a RuntimeError at startup if its dependencies are missing.
+
+workers:
+  aider:
+    enabled: true
+  hardened:
+    enabled: true
+
+retrieval:
+  broker:
+    enabled: true
+
+oracle:
+  swift_controller:
+    enabled: false

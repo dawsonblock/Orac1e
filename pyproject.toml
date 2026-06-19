@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "oracle-system"
+version = "0.1.0"
+description = "Oracle Build v5 — integration layer and control-plane services"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi",
+  "uvicorn",
+  "pydantic",
+  "pytest",
+  "redis",
+  "rq",
+  "gitpython",
+]
+
+[project.scripts]
+oracle-preflight   = "integration.preflight:check_all"
+oracle-run-server  = "scripts.serve_coding_runs:app"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["integration*", "scripts*", "runtime*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

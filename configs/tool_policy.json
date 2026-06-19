@@ -1,0 +1,8 @@
+{
+  "default": {
+    "allow_low": true,
+    "allow_medium": true,
+    "allow_high": false
+  },
+  "capability_overrides": {}
+}

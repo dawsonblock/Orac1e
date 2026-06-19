@@ -1,0 +1,12 @@
+{
+  "max_files": 6,
+  "max_changed_lines": 300,
+  "blocked_prefixes": [
+    ".git/",
+    ".github/",
+    "secrets/",
+    "infra/",
+    "deploy/"
+  ],
+  "deny_binary_patches": true
+}

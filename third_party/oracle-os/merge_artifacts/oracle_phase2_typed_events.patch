@@ -1,0 +1,1018 @@
+diff -ruN /mnt/data/oracle40_mod/Sources/OracleOS/Events/EventKinds.swift /mnt/data/oracle40_phase2/Sources/OracleOS/Events/EventKinds.swift
+--- /mnt/data/oracle40_mod/Sources/OracleOS/Events/EventKinds.swift	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/oracle40_phase2/Sources/OracleOS/Events/EventKinds.swift	2026-03-20 02:47:32.299379898 +0000
+@@ -0,0 +1,25 @@
++import Foundation
++
++public enum EventKinds {
++    public static let commandStarted = "CommandStarted"
++    public static let commandSucceeded = "CommandSucceeded"
++    public static let commandFailed = "CommandFailed"
++    public static let policyRejected = "PolicyRejected"
++
++    public static let uiObservationCaptured = "UIObservationCaptured"
++    public static let appFocused = "AppFocused"
++    public static let windowFocused = "WindowFocused"
++    public static let navigationObserved = "NavigationObserved"
++    public static let elementClicked = "ElementClicked"
++    public static let textEntered = "TextEntered"
++
++    public static let repositoryObserved = "RepositoryObserved"
++    public static let fileRead = "FileRead"
++    public static let fileModified = "FileModified"
++    public static let buildCompleted = "BuildCompleted"
++    public static let testsCompleted = "TestsCompleted"
++
++    public static let lessonPromoted = "LessonPromoted"
++    public static let recipeRecorded = "RecipeRecorded"
++    public static let traceSaved = "TraceSaved"
++}
+diff -ruN /mnt/data/oracle40_mod/Sources/OracleOS/Events/EventPayloadDecoder.swift /mnt/data/oracle40_phase2/Sources/OracleOS/Events/EventPayloadDecoder.swift
+--- /mnt/data/oracle40_mod/Sources/OracleOS/Events/EventPayloadDecoder.swift	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/oracle40_phase2/Sources/OracleOS/Events/EventPayloadDecoder.swift	2026-03-20 02:47:32.299810747 +0000
+@@ -0,0 +1,181 @@
++import Foundation
++
++public struct CommandLifecyclePayload: Codable, Sendable {
++    public let router: String?
++    public let status: String?
++    public let reason: String?
++    public let processNames: [String]?
++
++    public init(
++        router: String? = nil,
++        status: String? = nil,
++        reason: String? = nil,
++        processNames: [String]? = nil
++    ) {
++        self.router = router
++        self.status = status
++        self.reason = reason
++        self.processNames = processNames
++    }
++}
++
++public struct UIObservationEventPayload: Codable, Sendable {
++    public let appName: String?
++    public let windowTitle: String?
++    public let url: String?
++    public let visibleElementCount: Int?
++    public let modalPresent: Bool?
++    public let observationHash: String?
++
++    public init(
++        appName: String? = nil,
++        windowTitle: String? = nil,
++        url: String? = nil,
++        visibleElementCount: Int? = nil,
++        modalPresent: Bool? = nil,
++        observationHash: String? = nil
++    ) {
++        self.appName = appName
++        self.windowTitle = windowTitle
++        self.url = url
++        self.visibleElementCount = visibleElementCount
++        self.modalPresent = modalPresent
++        self.observationHash = observationHash
++    }
++}
++
++public struct AppFocusedPayload: Codable, Sendable {
++    public let appName: String
++
++    public init(appName: String) {
++        self.appName = appName
++    }
++}
++
++public struct WindowFocusedPayload: Codable, Sendable {
++    public let appName: String?
++    public let windowTitle: String?
++
++    public init(appName: String? = nil, windowTitle: String? = nil) {
++        self.appName = appName
++        self.windowTitle = windowTitle
++    }
++}
++
++public struct NavigationObservedPayload: Codable, Sendable {
++    public let url: String
++    public let appName: String?
++
++    public init(url: String, appName: String? = nil) {
++        self.url = url
++        self.appName = appName
++    }
++}
++
++public struct ElementClickedPayload: Codable, Sendable {
++    public let appName: String?
++    public let query: String?
++    public let domID: String?
++    public let button: String?
++
++    public init(appName: String? = nil, query: String? = nil, domID: String? = nil, button: String? = nil) {
++        self.appName = appName
++        self.query = query
++        self.domID = domID
++        self.button = button
++    }
++}
++
++public struct TextEnteredPayload: Codable, Sendable {
++    public let appName: String?
++    public let query: String?
++    public let domID: String?
++    public let textLength: Int
++
++    public init(appName: String? = nil, query: String? = nil, domID: String? = nil, textLength: Int) {
++        self.appName = appName
++        self.query = query
++        self.domID = domID
++        self.textLength = textLength
++    }
++}
++
++public struct RepositoryObservedPayload: Codable, Sendable {
++    public let repositoryRoot: String
++    public let activeBranch: String?
++    public let isGitDirty: Bool
++    public let openFileCount: Int
++
++    public init(repositoryRoot: String, activeBranch: String? = nil, isGitDirty: Bool, openFileCount: Int) {
++        self.repositoryRoot = repositoryRoot
++        self.activeBranch = activeBranch
++        self.isGitDirty = isGitDirty
++        self.openFileCount = openFileCount
++    }
++}
++
++public struct FileReadPayload: Codable, Sendable {
++    public let path: String
++
++    public init(path: String) {
++        self.path = path
++    }
++}
++
++public struct FileModifiedPayload: Codable, Sendable {
++    public let path: String
++    public let bytesWritten: Int?
++
++    public init(path: String, bytesWritten: Int? = nil) {
++        self.path = path
++        self.bytesWritten = bytesWritten
++    }
++}
++
++public struct BuildCompletedPayload: Codable, Sendable {
++    public let succeeded: Bool
++
++    public init(succeeded: Bool) {
++        self.succeeded = succeeded
++    }
++}
++
++public struct TestsCompletedPayload: Codable, Sendable {
++    public let succeeded: Bool
++    public let failingTestCount: Int?
++
++    public init(succeeded: Bool, failingTestCount: Int? = nil) {
++        self.succeeded = succeeded
++        self.failingTestCount = failingTestCount
++    }
++}
++
++public struct LessonPromotedPayload: Codable, Sendable {
++    public let signal: String
++
++    public init(signal: String) {
++        self.signal = signal
++    }
++}
++
++public struct RecipeRecordedPayload: Codable, Sendable {
++    public let name: String
++
++    public init(name: String) {
++        self.name = name
++    }
++}
++
++public struct TraceSavedPayload: Codable, Sendable {
++    public let traceID: String
++
++    public init(traceID: String) {
++        self.traceID = traceID
++    }
++}
++
++public enum EventPayloadDecoder {
++    public static func decode<T: Decodable>(_ type: T.Type, from envelope: EventEnvelope) -> T? {
++        try? OracleJSONCoding.makeDecoder().decode(T.self, from: envelope.payload)
++    }
++}
+diff -ruN /mnt/data/oracle40_mod/Sources/OracleOS/Execution/ExecutionOutcome.swift /mnt/data/oracle40_phase2/Sources/OracleOS/Execution/ExecutionOutcome.swift
+--- /mnt/data/oracle40_mod/Sources/OracleOS/Execution/ExecutionOutcome.swift	2026-03-20 00:00:59.000000000 +0000
++++ /mnt/data/oracle40_phase2/Sources/OracleOS/Execution/ExecutionOutcome.swift	2026-03-20 02:48:09.539173144 +0000
+@@ -20,8 +20,8 @@
+ 
+         // Runtime invariant: both success and failure paths must produce events.
+         if events.isEmpty {
+-            let fallbackEventType: String = (status == .success) ? "CommandSucceeded" : "CommandFailed"
+-            let payload = (try? JSONSerialization.data(withJSONObject: ["status": status.rawValue])) ?? Data()
++            let fallbackEventType: String = (status == .success) ? EventKinds.commandSucceeded : EventKinds.commandFailed
++            let payload = (try? OracleJSONCoding.makeEncoder().encode(CommandLifecyclePayload(status: status.rawValue))) ?? Data()
+             self.events = [
+                 EventEnvelope(
+                     sequenceNumber: 0,
+@@ -39,22 +39,22 @@
+ 
+     public static func failure(from error: any Error, command: Command) -> ExecutionOutcome {
+         let reason = error.localizedDescription
+-        let payload = (try? JSONSerialization.data(withJSONObject: ["reason": reason])) ?? Data()
++        let payload = (try? OracleJSONCoding.makeEncoder().encode(CommandLifecyclePayload(status: ExecutionStatus.failed.rawValue, reason: reason))) ?? Data()
+         let events = [
+             EventEnvelope(
+                 sequenceNumber: 0,
+                 commandID: command.id,
+                 intentID: command.metadata.intentID,
+                 timestamp: Date(),
+-                eventType: "CommandStarted",
+-                payload: (try? JSONSerialization.data(withJSONObject: ["status": "started"])) ?? Data()
++                eventType: EventKinds.commandStarted,
++                payload: (try? OracleJSONCoding.makeEncoder().encode(CommandLifecyclePayload(status: "started"))) ?? Data()
+             ),
+             EventEnvelope(
+                 sequenceNumber: 0,
+                 commandID: command.id,
+                 intentID: command.metadata.intentID,
+                 timestamp: Date(),
+-                eventType: "CommandFailed",
++                eventType: EventKinds.commandFailed,
+                 payload: payload
+             ),
+         ]
+diff -ruN /mnt/data/oracle40_mod/Sources/OracleOS/Execution/Routing/CodeRouter.swift /mnt/data/oracle40_phase2/Sources/OracleOS/Execution/Routing/CodeRouter.swift
+--- /mnt/data/oracle40_mod/Sources/OracleOS/Execution/Routing/CodeRouter.swift	2026-03-20 00:00:59.000000000 +0000
++++ /mnt/data/oracle40_phase2/Sources/OracleOS/Execution/Routing/CodeRouter.swift	2026-03-20 02:49:31.561465490 +0000
+@@ -54,7 +54,8 @@
+                     observations: observations,
+                     artifacts: [],
+                     policyDecision: policyDecision,
+-                    router: "code"
++                    router: "code",
++                    emittedEvents: successEvents(for: command, spec: spec, result: result)
+                 )
+             }
+ 
+@@ -64,7 +65,8 @@
+                 command: command,
+                 reason: truncatedFailureOutput,
+                 policyDecision: policyDecision,
+-                router: "code"
++                router: "code",
++                emittedEvents: successEvents(for: command, spec: spec, result: result)
+             )
+ 
+         case .code(let action):
+@@ -110,7 +112,10 @@
+                 ],
+                 artifacts: [],
+                 policyDecision: policyDecision,
+-                router: "code"
++                router: "code",
++                emittedEvents: [
++                    repositoryObservedEvent(command: command, snapshot: snapshot),
++                ]
+             )
+ 
+         case "readFile":
+@@ -125,12 +130,25 @@
+                     router: "code"
+                 )
+             }
++
++            var emittedEvents = [
++                CommandRouter.makeEvent(
++                    command: command,
++                    eventType: EventKinds.fileRead,
++                    payload: FileReadPayload(path: resolvedPath.path)
++                ),
++            ]
++            if let snapshot = repositorySnapshot(forWorkspacePath: action.workspacePath) {
++                emittedEvents.insert(repositoryObservedEvent(command: command, snapshot: snapshot), at: 0)
++            }
++
+             return CommandRouter.successOutcome(
+                 command: command,
+                 observations: [ObservationPayload(kind: "fileContent", content: text)],
+                 artifacts: [ArtifactPayload(kind: "file", identifier: resolvedPath.path, data: data)],
+                 policyDecision: policyDecision,
+-                router: "code"
++                router: "code",
++                emittedEvents: emittedEvents
+             )
+ 
+         case "modifyFile":
+@@ -146,6 +164,18 @@
+                 .flatMap { String(data: $0, encoding: .utf8) } ?? ""
+             let newContent = action.patch ?? existing
+             try newContent.write(to: resolvedPath, atomically: true, encoding: .utf8)
++
++            var emittedEvents = [
++                CommandRouter.makeEvent(
++                    command: command,
++                    eventType: EventKinds.fileModified,
++                    payload: FileModifiedPayload(path: resolvedPath.path, bytesWritten: newContent.lengthOfBytes(using: .utf8))
++                ),
++            ]
++            if let snapshot = repositorySnapshot(forWorkspacePath: action.workspacePath) {
++                emittedEvents.insert(repositoryObservedEvent(command: command, snapshot: snapshot), at: 0)
++            }
++
+             return CommandRouter.successOutcome(
+                 command: command,
+                 observations: [
+@@ -156,7 +186,8 @@
+                 ],
+                 artifacts: [ArtifactPayload(kind: "patch", identifier: resolvedPath.path)],
+                 policyDecision: policyDecision,
+-                router: "code"
++                router: "code",
++                emittedEvents: emittedEvents
+             )
+ 
+         default:
+@@ -169,6 +200,99 @@
+         }
+     }
+ 
++    private func successEvents(
++        for command: Command,
++        spec: CommandSpec,
++        result: CommandResult
++    ) -> [EventEnvelope] {
++        var events = [repositoryObservedEvent(command: command, workspaceRoot: spec.workspaceRoot)]
++
++        switch spec.category {
++        case .build:
++            events.append(
++                CommandRouter.makeEvent(
++                    command: command,
++                    eventType: EventKinds.buildCompleted,
++                    payload: BuildCompletedPayload(succeeded: result.succeeded)
++                )
++            )
++        case .test:
++            events.append(
++                CommandRouter.makeEvent(
++                    command: command,
++                    eventType: EventKinds.testsCompleted,
++                    payload: TestsCompletedPayload(
++                        succeeded: result.succeeded,
++                        failingTestCount: parseFailingTestCount(from: result.stdout + "\n" + result.stderr)
++                    )
++                )
++            )
++        default:
++            break
++        }
++
++        return events
++    }
++
++    private func parseFailingTestCount(from text: String) -> Int? {
++        let patterns = [
++            #"(\d+)\s+failures?"#,
++            #"(\d+)\s+tests?,\s+(\d+)\s+failures?"#,
++            #"failed\s*:\s*(\d+)"#,
++        ]
++
++        for pattern in patterns {
++            guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
++                continue
++            }
++            let range = NSRange(text.startIndex..<text.endIndex, in: text)
++            guard let match = regex.firstMatch(in: text, options: [], range: range) else {
++                continue
++            }
++
++            let captureIndex = match.numberOfRanges > 2 ? 2 : 1
++            let captureRange = match.range(at: captureIndex)
++            guard let stringRange = Range(captureRange, in: text) else {
++                continue
++            }
++            return Int(text[stringRange])
++        }
++
++        return resultSucceededMarker(in: text) ? 0 : nil
++    }
++
++    private func resultSucceededMarker(in text: String) -> Bool {
++        let lowered = text.lowercased()
++        return lowered.contains("0 failures") || lowered.contains("0 failed") || lowered.contains("passed")
++    }
++
++    private func repositorySnapshot(forWorkspacePath workspacePath: String?) -> RepositorySnapshot? {
++        guard let workspacePath, !workspacePath.isEmpty else { return nil }
++        return repositoryIndexer.indexIfNeeded(
++            workspaceRoot: URL(fileURLWithPath: workspacePath, isDirectory: true)
++        )
++    }
++
++    private func repositoryObservedEvent(command: Command, workspaceRoot: String) -> EventEnvelope {
++        let snapshot = repositoryIndexer.indexIfNeeded(
++            workspaceRoot: URL(fileURLWithPath: workspaceRoot, isDirectory: true)
++        )
++        return repositoryObservedEvent(command: command, snapshot: snapshot)
++    }
++
++    private func repositoryObservedEvent(command: Command, snapshot: RepositorySnapshot) -> EventEnvelope {
++        CommandRouter.makeEvent(
++            command: command,
++            eventType: EventKinds.repositoryObserved,
++            payload: RepositoryObservedPayload(
++                repositoryRoot: snapshot.workspaceRoot,
++                activeBranch: snapshot.activeBranch,
++                isGitDirty: snapshot.isGitDirty,
++                openFileCount: snapshot.files.filter { !$0.isDirectory }.count
++            )
++        )
++    }
++
+     private func resolvePath(filePath: String?, workspacePath: String?) throws -> URL? {
+         guard let filePath, !filePath.isEmpty else { return nil }
+         guard let workspacePath, !filePath.hasPrefix("/") else {
+diff -ruN /mnt/data/oracle40_mod/Sources/OracleOS/Execution/Routing/CommandRouter.swift /mnt/data/oracle40_phase2/Sources/OracleOS/Execution/Routing/CommandRouter.swift
+--- /mnt/data/oracle40_mod/Sources/OracleOS/Execution/Routing/CommandRouter.swift	2026-03-20 00:00:59.000000000 +0000
++++ /mnt/data/oracle40_phase2/Sources/OracleOS/Execution/Routing/CommandRouter.swift	2026-03-20 02:47:46.243596251 +0000
+@@ -41,18 +41,28 @@
+         observations: [ObservationPayload],
+         artifacts: [ArtifactPayload],
+         policyDecision: PolicyDecision,
+-        router: String
++        router: String,
++        emittedEvents: [EventEnvelope] = []
+     ) -> ExecutionOutcome {
+-        let events = [
+-            makeEvent(command: command, eventType: "CommandStarted", payload: ["router": router]),
+-            makeEvent(command: command, eventType: "CommandSucceeded", payload: ["router": router]),
++        let lifecycleEvents = [
++            makeEvent(
++                command: command,
++                eventType: EventKinds.commandStarted,
++                payload: CommandLifecyclePayload(router: router, status: "started")
++            ),
++            makeEvent(
++                command: command,
++                eventType: EventKinds.commandSucceeded,
++                payload: CommandLifecyclePayload(router: router, status: "success")
++            ),
+         ]
++
+         return ExecutionOutcome(
+             commandID: command.id,
+             status: .success,
+             observations: observations,
+             artifacts: artifacts,
+-            events: events,
++            events: lifecycleEvents + emittedEvents,
+             verifierReport: VerifierReport(
+                 commandID: command.id,
+                 preconditionsPassed: true,
+@@ -67,18 +77,28 @@
+         reason: String,
+         policyDecision: PolicyDecision,
+         router: String,
+-        status: ExecutionStatus = .failed
++        status: ExecutionStatus = .failed,
++        emittedEvents: [EventEnvelope] = []
+     ) -> ExecutionOutcome {
+-        let events = [
+-            makeEvent(command: command, eventType: "CommandStarted", payload: ["router": router]),
+-            makeEvent(command: command, eventType: "CommandFailed", payload: ["reason": reason, "router": router]),
++        let lifecycleEvents = [
++            makeEvent(
++                command: command,
++                eventType: EventKinds.commandStarted,
++                payload: CommandLifecyclePayload(router: router, status: "started")
++            ),
++            makeEvent(
++                command: command,
++                eventType: EventKinds.commandFailed,
++                payload: CommandLifecyclePayload(router: router, status: status.rawValue, reason: reason)
++            ),
+         ]
++
+         return ExecutionOutcome(
+             commandID: command.id,
+             status: status,
+             observations: [],
+             artifacts: [],
+-            events: events,
++            events: lifecycleEvents + emittedEvents,
+             verifierReport: VerifierReport(
+                 commandID: command.id,
+                 preconditionsPassed: true,
+@@ -89,12 +109,13 @@
+         )
+     }
+ 
+-    static func makeEvent(
++    static func makeEvent<P: Encodable>(
+         command: Command,
+         eventType: String,
+-        payload: [String: String]
++        payload: P
+     ) -> EventEnvelope {
+-        let encodedPayload = (try? JSONSerialization.data(withJSONObject: payload)) ?? Data()
++        let encoder = OracleJSONCoding.makeEncoder()
++        let encodedPayload = (try? encoder.encode(payload)) ?? Data()
+         return EventEnvelope(
+             sequenceNumber: 0,
+             commandID: command.id,
+diff -ruN /mnt/data/oracle40_mod/Sources/OracleOS/Execution/Routing/UIRouter.swift /mnt/data/oracle40_phase2/Sources/OracleOS/Execution/Routing/UIRouter.swift
+--- /mnt/data/oracle40_mod/Sources/OracleOS/Execution/Routing/UIRouter.swift	2026-03-20 00:00:59.000000000 +0000
++++ /mnt/data/oracle40_phase2/Sources/OracleOS/Execution/Routing/UIRouter.swift	2026-03-20 02:48:45.278907555 +0000
+@@ -46,7 +46,8 @@
+                 observations: observations,
+                 artifacts: [],
+                 policyDecision: policyDecision,
+-                router: "ui"
++                router: "ui",
++                emittedEvents: successEvents(for: command, action: action, result: result)
+             )
+         }
+ 
+@@ -58,6 +59,174 @@
+         )
+     }
+ 
++    private func successEvents(for command: Command, action: UIAction, result: ToolResult) -> [EventEnvelope] {
++        var events: [EventEnvelope] = []
++        let observedApp = result.context?.app ?? action.app
++        let observedWindow = result.context?.window ?? action.windowTitle
++        let observedURL = result.context?.url ?? action.query.flatMap { raw in
++            URL(string: raw) != nil ? raw : nil
++        }
++
++        if let observedApp {
++            events.append(
++                CommandRouter.makeEvent(
++                    command: command,
++                    eventType: EventKinds.appFocused,
++                    payload: AppFocusedPayload(appName: observedApp)
++                )
++            )
++        }
++
++        if observedApp != nil || observedWindow != nil {
++            events.append(
++                CommandRouter.makeEvent(
++                    command: command,
++                    eventType: EventKinds.windowFocused,
++                    payload: WindowFocusedPayload(appName: observedApp, windowTitle: observedWindow)
++                )
++            )
++        }
++
++        if let observedURL {
++            events.append(
++                CommandRouter.makeEvent(
++                    command: command,
++                    eventType: EventKinds.navigationObserved,
++                    payload: NavigationObservedPayload(url: observedURL, appName: observedApp)
++                )
++            )
++        }
++
++        if let observationPayload = makeObservationPayload(result: result, fallbackApp: observedApp, fallbackWindow: observedWindow, fallbackURL: observedURL) {
++            events.append(
++                CommandRouter.makeEvent(
++                    command: command,
++                    eventType: EventKinds.uiObservationCaptured,
++                    payload: observationPayload
++                )
++            )
++        }
++
++        switch normalizedActionName(action.name) {
++        case .click:
++            events.append(
++                CommandRouter.makeEvent(
++                    command: command,
++                    eventType: EventKinds.elementClicked,
++                    payload: ElementClickedPayload(
++                        appName: observedApp,
++                        query: action.query,
++                        domID: action.domID,
++                        button: action.button
++                    )
++                )
++            )
++
++        case .type:
++            events.append(
++                CommandRouter.makeEvent(
++                    command: command,
++                    eventType: EventKinds.textEntered,
++                    payload: TextEnteredPayload(
++                        appName: observedApp,
++                        query: action.query,
++                        domID: action.domID,
++                        textLength: action.text?.count ?? 0
++                    )
++                )
++            )
++
++        case .focus:
++            break
++        }
++
++        return events
++    }
++
++    private func makeObservationPayload(
++        result: ToolResult,
++        fallbackApp: String?,
++        fallbackWindow: String?,
++        fallbackURL: String?
++    ) -> UIObservationEventPayload? {
++        let visibleElementCount = intValue(forKeys: ["visibleElementCount", "elementCount"], in: result.data)
++        let modalPresent = boolValue(forKeys: ["modalPresent", "isModal"], in: result.data)
++        let observationHash = stringValue(forKeys: ["observationHash", "snapshotHash"], in: result.data)
++        let appName = result.context?.app ?? fallbackApp
++        let windowTitle = result.context?.window ?? fallbackWindow
++        let url = result.context?.url ?? fallbackURL
++
++        guard appName != nil || windowTitle != nil || url != nil || visibleElementCount != nil || modalPresent != nil || observationHash != nil else {
++            return nil
++        }
++
++        return UIObservationEventPayload(
++            appName: appName,
++            windowTitle: windowTitle,
++            url: url,
++            visibleElementCount: visibleElementCount,
++            modalPresent: modalPresent,
++            observationHash: observationHash
++        )
++    }
++
++    private func stringValue(forKeys keys: [String], in dictionary: [String: Any]?) -> String? {
++        guard let dictionary else { return nil }
++        for key in keys {
++            if let value = dictionary[key] as? String, !value.isEmpty {
++                return value
++            }
++        }
++        return nil
++    }
++
++    private func intValue(forKeys keys: [String], in dictionary: [String: Any]?) -> Int? {
++        guard let dictionary else { return nil }
++        for key in keys {
++            if let value = dictionary[key] as? Int {
++                return value
++            }
++            if let value = dictionary[key] as? NSNumber {
++                return value.intValue
++            }
++            if let value = dictionary[key] as? String, let parsed = Int(value) {
++                return parsed
++            }
++        }
++        return nil
++    }
++
++    private func boolValue(forKeys keys: [String], in dictionary: [String: Any]?) -> Bool? {
++        guard let dictionary else { return nil }
++        for key in keys {
++            if let value = dictionary[key] as? Bool {
++                return value
++            }
++            if let value = dictionary[key] as? NSNumber {
++                return value.boolValue
++            }
++            if let value = dictionary[key] as? String {
++                switch value.lowercased() {
++                case "true", "1", "yes": return true
++                case "false", "0", "no": return false
++                default: break
++                }
++            }
++        }
++        return nil
++    }
++
++    private func normalizedActionName(_ name: String) -> NormalizedUIAction {
++        switch name {
++        case "click", "clickElement":
++            return .click
++        case "type", "typeText":
++            return .type
++        default:
++            return .focus
++        }
++    }
++
+     @MainActor
+     private func execute(_ action: UIAction) -> ToolResult {
+         switch action.name {
+@@ -126,6 +295,12 @@
+     }
+ }
+ 
++private enum NormalizedUIAction {
++    case click
++    case type
++    case focus
++}
++
+ private extension ToolResult {
+     var summary: String {
+         if let summary = data?["summary"] as? String, !summary.isEmpty {
+diff -ruN /mnt/data/oracle40_mod/Sources/OracleOS/Execution/VerifiedExecutor.swift /mnt/data/oracle40_phase2/Sources/OracleOS/Execution/VerifiedExecutor.swift
+--- /mnt/data/oracle40_mod/Sources/OracleOS/Execution/VerifiedExecutor.swift	2026-03-20 00:00:59.000000000 +0000
++++ /mnt/data/oracle40_phase2/Sources/OracleOS/Execution/VerifiedExecutor.swift	2026-03-20 02:47:59.786940185 +0000
+@@ -24,7 +24,11 @@
+     /// Execute a validated command and return outcome with events.
+     /// IMPORTANT: This does NOT commit state — only returns events for CommitCoordinator.
+     public func execute(_ command: Command) async throws -> ExecutionOutcome {
+-        let started = makeEvent(command: command, eventType: "CommandStarted", payload: ["status": "started"])
++        let started = makeEvent(
++            command: command,
++            eventType: EventKinds.commandStarted,
++            payload: CommandLifecyclePayload(status: "started")
++        )
+         let policyDecision = try policyEngine.validate(command)
+         guard policyDecision.allowed else {
+             return failOutcome(
+@@ -33,7 +37,11 @@
+                 reason: policyDecision.reason ?? "Policy rejected",
+                 extraEvents: [
+                     started,
+-                    makeEvent(command: command, eventType: "PolicyRejected", payload: ["reason": policyDecision.reason ?? "blocked"]),
++                    makeEvent(
++                        command: command,
++                        eventType: EventKinds.policyRejected,
++                        payload: CommandLifecyclePayload(status: "blocked", reason: policyDecision.reason ?? "blocked")
++                    ),
+                 ]
+             )
+         }
+@@ -56,7 +64,14 @@
+                     status: outcome.status,
+                     observations: outcome.observations,
+                     artifacts: outcome.artifacts,
+-                    events: [started, makeEvent(command: command, eventType: "CommandSucceeded", payload: ["status": "success"])],
++                    events: [
++                        started,
++                        makeEvent(
++                            command: command,
++                            eventType: EventKinds.commandSucceeded,
++                            payload: CommandLifecyclePayload(status: "success")
++                        ),
++                    ],
+                     verifierReport: outcome.verifierReport
+                 )
+             }
+@@ -85,7 +100,13 @@
+             notes: [reason]
+         )
+         var events = extraEvents
+-        events.append(makeEvent(command: command, eventType: "CommandFailed", payload: ["reason": reason]))
++        events.append(
++            makeEvent(
++                command: command,
++                eventType: EventKinds.commandFailed,
++                payload: CommandLifecyclePayload(status: status.rawValue, reason: reason)
++            )
++        )
+         return ExecutionOutcome(
+             commandID: command.id,
+             status: status,
+@@ -96,12 +117,12 @@
+         )
+     }
+ 
+-    private func makeEvent(
++    private func makeEvent<P: Encodable>(
+         command: Command,
+         eventType: String,
+-        payload: [String: String]
++        payload: P
+     ) -> EventEnvelope {
+-        let encodedPayload = (try? JSONSerialization.data(withJSONObject: payload)) ?? Data()
++        let encodedPayload = (try? OracleJSONCoding.makeEncoder().encode(payload)) ?? Data()
+         return EventEnvelope(
+             sequenceNumber: 0,
+             commandID: command.id,
+diff -ruN /mnt/data/oracle40_mod/Sources/OracleOS/State/Reducers/MemoryStateReducer.swift /mnt/data/oracle40_phase2/Sources/OracleOS/State/Reducers/MemoryStateReducer.swift
+--- /mnt/data/oracle40_mod/Sources/OracleOS/State/Reducers/MemoryStateReducer.swift	2026-03-20 02:38:07.861117048 +0000
++++ /mnt/data/oracle40_phase2/Sources/OracleOS/State/Reducers/MemoryStateReducer.swift	2026-03-20 02:50:35.259753260 +0000
+@@ -12,17 +12,22 @@
+             let payload = ReducerSupport.dictionary(from: event)
+ 
+             switch event.eventType {
+-            case "LessonPromoted":
+-                let signal = ReducerSupport.string("signal", in: payload)
++            case EventKinds.lessonPromoted:
++                let signal = EventPayloadDecoder.decode(LessonPromotedPayload.self, from: event)?.signal
++                    ?? ReducerSupport.string("signal", in: payload)
+                     ?? ReducerSupport.string("lesson", in: payload)
+                 knowledgeSignals = ReducerSupport.appendUnique(knowledgeSignals, value: signal)
+ 
+-            case "RecipeRecorded":
+-                let name = ReducerSupport.string("name", in: payload) ?? "recipe recorded"
++            case EventKinds.recipeRecorded:
++                let name = EventPayloadDecoder.decode(RecipeRecordedPayload.self, from: event)?.name
++                    ?? ReducerSupport.string("name", in: payload)
++                    ?? "recipe recorded"
+                 notes = ReducerSupport.appendUnique(notes, value: name, limit: 20)
+ 
+-            case "TraceSaved":
+-                let trace = ReducerSupport.string("traceID", in: payload) ?? "trace saved"
++            case EventKinds.traceSaved:
++                let trace = EventPayloadDecoder.decode(TraceSavedPayload.self, from: event)?.traceID
++                    ?? ReducerSupport.string("traceID", in: payload)
++                    ?? "trace saved"
+                 notes = ReducerSupport.appendUnique(notes, value: trace, limit: 20)
+ 
+             default:
+diff -ruN /mnt/data/oracle40_mod/Sources/OracleOS/State/Reducers/ProjectStateReducer.swift /mnt/data/oracle40_phase2/Sources/OracleOS/State/Reducers/ProjectStateReducer.swift
+--- /mnt/data/oracle40_mod/Sources/OracleOS/State/Reducers/ProjectStateReducer.swift	2026-03-20 02:38:07.860919059 +0000
++++ /mnt/data/oracle40_phase2/Sources/OracleOS/State/Reducers/ProjectStateReducer.swift	2026-03-20 02:50:35.247550260 +0000
+@@ -16,42 +16,47 @@
+             let payload = ReducerSupport.dictionary(from: event)
+ 
+             switch event.eventType {
+-            case "RepositoryObserved":
+-                if let value = ReducerSupport.string("repositoryRoot", in: payload) ?? ReducerSupport.string("workspaceRoot", in: payload) {
++            case EventKinds.repositoryObserved:
++                let typed = EventPayloadDecoder.decode(RepositoryObservedPayload.self, from: event)
++                if let value = typed?.repositoryRoot ?? ReducerSupport.string("repositoryRoot", in: payload) ?? ReducerSupport.string("workspaceRoot", in: payload) {
+                     repositoryRoot = value
+                 }
+-                if let value = ReducerSupport.string("activeBranch", in: payload) {
++                if let value = typed?.activeBranch ?? ReducerSupport.string("activeBranch", in: payload) {
+                     activeBranch = value
+                 }
+-                if let value = ReducerSupport.bool("isGitDirty", in: payload) {
++                if let value = typed?.isGitDirty ?? ReducerSupport.bool("isGitDirty", in: payload) {
+                     isGitDirty = value
+                 }
+-                if let value = ReducerSupport.int("openFileCount", in: payload) {
++                if let value = typed?.openFileCount ?? ReducerSupport.int("openFileCount", in: payload) {
+                     openFileCount = value
+                 }
+ 
+-            case "FileRead":
+-                if ReducerSupport.string("path", in: payload) != nil {
++            case EventKinds.fileRead:
++                let typed = EventPayloadDecoder.decode(FileReadPayload.self, from: event)
++                if typed?.path != nil || ReducerSupport.string("path", in: payload) != nil {
+                     openFileCount = max(openFileCount, 1)
+                 }
+ 
+-            case "FileModified":
+-                if ReducerSupport.string("path", in: payload) != nil {
++            case EventKinds.fileModified:
++                let typed = EventPayloadDecoder.decode(FileModifiedPayload.self, from: event)
++                if typed?.path != nil || ReducerSupport.string("path", in: payload) != nil {
+                     isGitDirty = true
+                     openFileCount = max(openFileCount, 1)
+                 }
+ 
+-            case "BuildCompleted":
+-                if let value = ReducerSupport.bool("succeeded", in: payload) ?? ReducerSupport.bool("buildSucceeded", in: payload) {
++            case EventKinds.buildCompleted:
++                let typed = EventPayloadDecoder.decode(BuildCompletedPayload.self, from: event)
++                if let value = typed?.succeeded ?? ReducerSupport.bool("succeeded", in: payload) ?? ReducerSupport.bool("buildSucceeded", in: payload) {
+                     buildSucceeded = value
+                 } else if let status = ReducerSupport.string("status", in: payload) {
+                     buildSucceeded = (status.lowercased() == "success")
+                 }
+ 
+-            case "TestsCompleted":
+-                if let value = ReducerSupport.int("failingTestCount", in: payload) {
++            case EventKinds.testsCompleted:
++                let typed = EventPayloadDecoder.decode(TestsCompletedPayload.self, from: event)
++                if let value = typed?.failingTestCount ?? ReducerSupport.int("failingTestCount", in: payload) {
+                     failingTestCount = value
+-                } else if let succeeded = ReducerSupport.bool("succeeded", in: payload) {
++                } else if let succeeded = typed?.succeeded ?? ReducerSupport.bool("succeeded", in: payload) {
+                     failingTestCount = succeeded ? 0 : failingTestCount
+                 }
+ 
+diff -ruN /mnt/data/oracle40_mod/Sources/OracleOS/State/Reducers/RuntimeStateReducer.swift /mnt/data/oracle40_phase2/Sources/OracleOS/State/Reducers/RuntimeStateReducer.swift
+--- /mnt/data/oracle40_mod/Sources/OracleOS/State/Reducers/RuntimeStateReducer.swift	2026-03-20 02:38:07.860089932 +0000
++++ /mnt/data/oracle40_phase2/Sources/OracleOS/State/Reducers/RuntimeStateReducer.swift	2026-03-20 02:50:35.225965961 +0000
+@@ -10,28 +10,30 @@
+         var notes = snapshot.notes
+ 
+         for event in events {
++            let lifecyclePayload = EventPayloadDecoder.decode(CommandLifecyclePayload.self, from: event)
+             let payload = ReducerSupport.dictionary(from: event)
+ 
+             switch event.eventType {
+-            case "CommandSucceeded", "CommandFailed":
++            case EventKinds.commandSucceeded, EventKinds.commandFailed:
+                 cycleCount += 1
+ 
+-            case "PolicyRejected":
+-                let reason = ReducerSupport.string("reason", in: payload) ?? "policy rejected"
++            case EventKinds.policyRejected:
++                let reason = lifecyclePayload?.reason
++                    ?? ReducerSupport.string("reason", in: payload)
++                    ?? "policy rejected"
+                 notes = ReducerSupport.appendUnique(notes, value: reason, limit: 20)
+ 
+             default:
+                 break
+             }
+ 
+-            if let names = ReducerSupport.stringArray("processNames", in: payload) {
++            if let names = lifecyclePayload?.processNames ?? ReducerSupport.stringArray("processNames", in: payload) {
+                 processNames = ReducerSupport.unique(names)
+-            } else if let name = ReducerSupport.string("processName", in: payload) {
+-                processNames = ReducerSupport.appendUnique(processNames, value: name)
+             }
+ 
+-            if let router = ReducerSupport.string("router", in: payload), event.eventType == "CommandFailed" {
+-                notes = ReducerSupport.appendUnique(notes, value: "command failed via \(router)", limit: 20)
++            if event.eventType == EventKinds.commandFailed {
++                let router = lifecyclePayload?.router ?? ReducerSupport.string("router", in: payload)
++                notes = ReducerSupport.appendUnique(notes, value: router.map { "command failed via \($0)" }, limit: 20)
+             }
+         }
+ 
+diff -ruN /mnt/data/oracle40_mod/Sources/OracleOS/State/Reducers/UIStateReducer.swift /mnt/data/oracle40_phase2/Sources/OracleOS/State/Reducers/UIStateReducer.swift
+--- /mnt/data/oracle40_mod/Sources/OracleOS/State/Reducers/UIStateReducer.swift	2026-03-20 02:38:07.860557141 +0000
++++ /mnt/data/oracle40_phase2/Sources/OracleOS/State/Reducers/UIStateReducer.swift	2026-03-20 02:50:35.236923523 +0000
+@@ -16,42 +16,49 @@
+             let payload = ReducerSupport.dictionary(from: event)
+ 
+             switch event.eventType {
+-            case "UIObservationCaptured":
+-                if let value = ReducerSupport.string("appName", in: payload) ?? ReducerSupport.string("app", in: payload) {
++            case EventKinds.uiObservationCaptured:
++                let typed = EventPayloadDecoder.decode(UIObservationEventPayload.self, from: event)
++                if let value = typed?.appName ?? ReducerSupport.string("appName", in: payload) ?? ReducerSupport.string("app", in: payload) {
+                     activeApplication = value
+                 }
+-                if let value = ReducerSupport.string("windowTitle", in: payload) {
++                if let value = typed?.windowTitle ?? ReducerSupport.string("windowTitle", in: payload) {
+                     windowTitle = value
+                 }
+-                if let value = ReducerSupport.string("url", in: payload) {
++                if let value = typed?.url ?? ReducerSupport.string("url", in: payload) {
+                     url = value
+                 }
+-                if let value = ReducerSupport.int("visibleElementCount", in: payload) {
++                if let value = typed?.visibleElementCount ?? ReducerSupport.int("visibleElementCount", in: payload) {
+                     visibleElementCount = value
+                 }
+-                if let value = ReducerSupport.bool("modalPresent", in: payload) {
++                if let value = typed?.modalPresent ?? ReducerSupport.bool("modalPresent", in: payload) {
+                     modalPresent = value
+                 }
+-                if let value = ReducerSupport.string("observationHash", in: payload) {
++                if let value = typed?.observationHash ?? ReducerSupport.string("observationHash", in: payload) {
+                     observationHash = value
+                 }
+ 
+-            case "AppFocused":
+-                activeApplication = ReducerSupport.string("appName", in: payload) ?? ReducerSupport.string("app", in: payload) ?? activeApplication
++            case EventKinds.appFocused:
++                let typed = EventPayloadDecoder.decode(AppFocusedPayload.self, from: event)
++                activeApplication = typed?.appName
++                    ?? ReducerSupport.string("appName", in: payload)
++                    ?? ReducerSupport.string("app", in: payload)
++                    ?? activeApplication
+ 
+-            case "WindowFocused":
+-                if let value = ReducerSupport.string("appName", in: payload) ?? ReducerSupport.string("app", in: payload) {
++            case EventKinds.windowFocused:
++                let typed = EventPayloadDecoder.decode(WindowFocusedPayload.self, from: event)
++                if let value = typed?.appName ?? ReducerSupport.string("appName", in: payload) ?? ReducerSupport.string("app", in: payload) {
+                     activeApplication = value
+                 }
+-                if let value = ReducerSupport.string("windowTitle", in: payload) {
++                if let value = typed?.windowTitle ?? ReducerSupport.string("windowTitle", in: payload) {
+                     windowTitle = value
+                 }
+ 
+-            case "NavigationObserved":
+-                if let value = ReducerSupport.string("url", in: payload) {
++            case EventKinds.navigationObserved:
++                let typed = EventPayloadDecoder.decode(NavigationObservedPayload.self, from: event)
++                if let value = typed?.url ?? ReducerSupport.string("url", in: payload) {
+                     url = value
+                 }
+-                if let value = ReducerSupport.string("appName", in: payload) ?? ReducerSupport.string("app", in: payload) {
++                if let value = typed?.appName ?? ReducerSupport.string("appName", in: payload) ?? ReducerSupport.string("app", in: payload) {
+                     activeApplication = value
+                 }
+ 

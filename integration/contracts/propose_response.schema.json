@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "status",
+    "worker",
+    "summary",
+    "diff"
+  ],
+  "properties": {
+    "status": {
+      "enum": [
+        "ok",
+        "blocked",
+        "error"
+      ]
+    },
+    "worker": {
+      "type": "string"
+    },
+    "summary": {
+      "type": "string"
+    },
+    "diff": {
+      "type": "string"
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "base": "Oracle-OS-main 40",
+  "applied_bundles": [
+    "phase 1 truth-hardening",
+    "phase 2 typed-events",
+    "phase 3 preconditions",
+    "phase 4 independent-verification",
+    "phase 5 cleanup/governance"
+  ],
+  "reference_imports_from_32": {
+    "docs": "Reference/oracle32/docs",
+    "plans": "Reference/oracle32/plans",
+    "oracle_os_evals": "Reference/oracle32/Tests/OracleOSEvals",
+    "binary_archive": "Reference/oracle32/oracle-os-2.0.6-macos-arm64.tar.gz"
+  }
+}

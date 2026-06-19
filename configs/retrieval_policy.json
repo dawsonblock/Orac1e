@@ -1,0 +1,5 @@
+{
+  "default_top_k": 10,
+  "max_top_k": 50,
+  "enable_query_variants": false
+}

@@ -1,0 +1,57 @@
+{
+  "generated_at": "2026-03-21T06:24:19.048067+00:00",
+  "root_path": "/mnt/data/oracle_build_work/integration/tools",
+  "tool_count": 3,
+  "capabilities": [
+    "retrieval.code.search",
+    "worker.code.interactive",
+    "worker.code.issue_fix",
+    "worker.code.patch"
+  ],
+  "tools": [
+    {
+      "id": "aider",
+      "name": "Aider Worker",
+      "kind": "worker",
+      "capabilities": [
+        "worker.code.patch",
+        "worker.code.interactive"
+      ],
+      "base_url": "http://127.0.0.1:8788",
+      "invoke_path": "/invoke",
+      "health_path": "/health",
+      "risk_level": "medium",
+      "healthy": false,
+      "detail": "worker \u00b7 risk=medium \u00b7 caps=worker.code.patch, worker.code.interactive"
+    },
+    {
+      "id": "cocoindex",
+      "name": "Cocoindex Retrieval",
+      "kind": "retrieval",
+      "capabilities": [
+        "retrieval.code.search"
+      ],
+      "base_url": "http://127.0.0.1:8787",
+      "invoke_path": "/invoke",
+      "health_path": "/health",
+      "risk_level": "low",
+      "healthy": false,
+      "detail": "retrieval \u00b7 risk=low \u00b7 caps=retrieval.code.search"
+    },
+    {
+      "id": "hardened",
+      "name": "Hardened Code Worker",
+      "kind": "worker",
+      "capabilities": [
+        "worker.code.patch",
+        "worker.code.issue_fix"
+      ],
+      "base_url": "http://127.0.0.1:8789",
+      "invoke_path": "/invoke",
+      "health_path": "/health",
+      "risk_level": "medium",
+      "healthy": false,
+      "detail": "worker \u00b7 risk=medium \u00b7 caps=worker.code.patch, worker.code.issue_fix"
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+contracts:
+  hard:
+    - id: no_default_branch_push
+      deny: "target_branch in ['main', 'master', 'release']"
+
+    - id: no_merge
+      deny: "action_type == 'pr.merge'"
+
+    - id: no_forbidden_paths
+      deny: "any(changed_path.startswith(prefix) for changed_path in changed_paths for prefix in ['.github/workflows/', 'infra/', 'deploy/', 'secrets/'])"
+
+    - id: no_network_in_tests
+      deny: "test_runtime_network == True"
+
+    - id: no_workspace_escape
+      deny: "path_outside_workspace == True"
+
+    - id: tests_required_for_code_changes
+      when: "changed_code_files_count > 0"
+      require: "targeted_tests_passed == True"
+
+  soft:
+    - id: max_changed_files
+      value: 12
+    - id: min_confidence_to_open_draft_pr
+      value: 0.60

@@ -1,0 +1,26 @@
+{
+  "profile": "python",
+  "language": "python",
+  "commands": [
+    "python -m compileall src",
+    "pytest -q tests"
+  ],
+  "stages": [
+    {
+      "id": "preflight",
+      "name": "Preflight",
+      "commands": [
+        "python -m compileall src"
+      ],
+      "haltOnFailure": true
+    },
+    {
+      "id": "targeted_tests",
+      "name": "Targeted tests",
+      "commands": [
+        "pytest -q tests"
+      ],
+      "haltOnFailure": true
+    }
+  ]
+}
