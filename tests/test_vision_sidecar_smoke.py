@@ -106,13 +106,16 @@ class TestVisionSidecarSmoke:
 
     def test_health(self):
         data = _get(self.port, "/health")
-        assert data.get("status") == "ok"
+        # Server returns "ready" (model loaded) or "idle" (no model) — not "ok"
+        assert data.get("status") in ("ready", "idle")
         assert "version" in data
 
     def test_metrics_json(self):
         data = _get(self.port, "/metrics")
         assert isinstance(data, dict)
-        assert "requests_total" in data or "total_requests" in data or "requests" in data
+        # Server nests metrics under data["metrics"]
+        metrics = data.get("metrics", data)
+        assert "total_requests" in metrics or "requests_total" in metrics or "requests" in metrics
 
     def test_config(self):
         data = _get(self.port, "/config")
@@ -121,12 +124,14 @@ class TestVisionSidecarSmoke:
 
     def test_diff_with_tiny_pngs(self):
         img = _make_tiny_png()
+        # Server expects image_a / image_b, not image_before / image_after
         status, data = _post_json(self.port, "/diff", {
-            "image_before": img,
-            "image_after": img,
+            "image_a": img,
+            "image_b": img,
         })
         assert status == 200
-        assert "diff_pct" in data or "changed" in data or "ok" in data
+        # Server returns has_changes, change_ratio, not diff_pct or changed
+        assert "has_changes" in data or "change_ratio" in data or "ok" in data
 
 
 class TestVisionSidecarModelTests:

@@ -790,14 +790,11 @@ final class ControllerStore {
 
     func runSelectedRecipe() async {
         let recipeName = selectedRecipeName ?? draftRecipe.name
-        let params = recipeRunParameters.reduce(into: [String: String]()) { partialResult, entry in
-            partialResult[entry.key] = entry.value
-        }
 
         do {
             isBusy = true
             defer { isBusy = false }
-            let response = try await send(.init(command: .runRecipe, recipeName: recipeName, recipeParams: params))
+            let response = try await send(.init(command: .runRecipe, recipeName: recipeName, recipeParams: recipeRunParameters))
             if let recipeRun = response.recipeRun {
                 latestRecipeRun = recipeRun
                 inlineMessage = recipeRun.paused ? "Recipe paused pending approval." : (recipeRun.success ? "Recipe completed." : "Recipe failed.")
@@ -1009,13 +1006,14 @@ final class ControllerStore {
     }
 
     private func append(_ traceStep: TraceStepViewModel) {
-        if traceSessions.contains(where: { $0.id == traceStep.sessionID }) {
-            traceSessions = traceSessions.map {
-                if $0.id == traceStep.sessionID {
-                    return TraceSessionSummary(id: $0.id, stepCount: $0.stepCount + 1, lastUpdated: traceStep.timestamp)
-                }
-                return $0
-            }.sorted { ($0.lastUpdated ?? .distantPast) > ($1.lastUpdated ?? .distantPast) }
+        if let index = traceSessions.firstIndex(where: { $0.id == traceStep.sessionID }) {
+            let updated = TraceSessionSummary(
+                id: traceSessions[index].id,
+                stepCount: traceSessions[index].stepCount + 1,
+                lastUpdated: traceStep.timestamp
+            )
+            traceSessions[index] = updated
+            traceSessions.sort { ($0.lastUpdated ?? .distantPast) > ($1.lastUpdated ?? .distantPast) }
         } else {
             traceSessions.insert(
                 TraceSessionSummary(id: traceStep.sessionID, stepCount: 1, lastUpdated: traceStep.timestamp),
@@ -1049,7 +1047,7 @@ final class ControllerStore {
 
         recentActions.insert(action, at: 0)
         if recentActions.count > 8 {
-            recentActions = Array(recentActions.prefix(8))
+            recentActions.removeLast()
         }
     }
 

@@ -4,7 +4,7 @@ bootstrap:
 	bash scripts/bootstrap_all.sh
 
 start:
-	bash scripts/start_all.sh
+	bash scripts/run_local.sh
 
 stop:
 	bash scripts/stop_all.sh

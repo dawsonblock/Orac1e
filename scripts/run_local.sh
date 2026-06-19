@@ -184,6 +184,7 @@ echo "╚═══════════════════════�
 echo ""
 echo "  Run server       : http://${ORACLE_HOST:-127.0.0.1}:${RUN_SERVER_PORT:-8080}/health"
 echo "  Run server ready : http://${ORACLE_HOST:-127.0.0.1}:${RUN_SERVER_PORT:-8080}/ready"
-echo "  Run endpoint     : http://${ORACLE_HOST:-127.0.0.1}:${RUN_SERVER_PORT:-8080}/run"
+echo "  List runs        : http://${ORACLE_HOST:-127.0.0.1}:${RUN_SERVER_PORT:-8080}/runs"
+echo "  Create run       : POST http://${ORACLE_HOST:-127.0.0.1}:${RUN_SERVER_PORT:-8080}/runs"
 echo ""
 echo "  Stop all         : bash scripts/stop_all.sh"

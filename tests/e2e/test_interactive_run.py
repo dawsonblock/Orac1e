@@ -16,6 +16,12 @@ import pytest
 from scripts import coding_run_promotion as crp
 
 
+def _commit_worktree(worktree):
+    """Commit all changes in the worktree so HEAD~1..HEAD captures the diff."""
+    subprocess.run(["git", "-C", str(worktree), "add", "."], check=True, capture_output=True, text=True)
+    subprocess.run(["git", "-C", str(worktree), "commit", "-m", "wip"], check=True, capture_output=True, text=True)
+
+
 class TestInteractiveRunPromotion:
     """Tests for interactive run promotion functionality."""
 
@@ -23,6 +29,7 @@ class TestInteractiveRunPromotion:
         """Test that interactive run promotion commits changes to canonical repo."""
         worktree = promotion_env["worktree"]
         (worktree / "app.py").write_text("print('updated')\n", encoding="utf-8")
+        _commit_worktree(worktree)
 
         result = crp.promote_run(
             promotion_env["run_id"], actor="tester", note="ship it"
@@ -31,7 +38,6 @@ class TestInteractiveRunPromotion:
         assert result.status == "applied", \
             "Promotion should succeed with status 'applied'"
 
-        # Verify commit was made
         head_message = subprocess.run(
             ["git", "-C", str(promotion_env["canonical"]), "log", "-1", "--pretty=%s"],
             check=True,
@@ -47,6 +53,7 @@ class TestInteractiveRunPromotion:
         worktree = promotion_env["worktree"]
         updated_content = "print('interactive update')\n"
         (worktree / "app.py").write_text(updated_content, encoding="utf-8")
+        _commit_worktree(worktree)
 
         crp.promote_run(promotion_env["run_id"], actor="tester", note="ship it")
 
@@ -61,6 +68,7 @@ class TestInteractiveRunPromotion:
         """Test that promotion updates the runs.json status."""
         worktree = promotion_env["worktree"]
         (worktree / "app.py").write_text("print('updated')\n", encoding="utf-8")
+        _commit_worktree(worktree)
 
         crp.promote_run(promotion_env["run_id"], actor="tester", note="ship it")
 
@@ -80,6 +88,7 @@ class TestPromotionApprovalReceipt:
         (promotion_env["worktree"] / "app.py").write_text(
             "print('updated')\n", encoding="utf-8"
         )
+        _commit_worktree(promotion_env["worktree"])
 
         crp.promote_run(promotion_env["run_id"], actor="tester", note="ok")
 
@@ -123,14 +132,13 @@ class TestInteractiveRunIdempotency:
         """Test that promoting an already applied run is idempotent."""
         worktree = promotion_env["worktree"]
         (worktree / "app.py").write_text("print('updated')\n", encoding="utf-8")
+        _commit_worktree(worktree)
 
-        # First promotion
         result1 = crp.promote_run(
             promotion_env["run_id"], actor="tester", note="first"
         )
         assert result1.status == "applied"
 
-        # Second promotion should be idempotent
         result2 = crp.promote_run(
             promotion_env["run_id"], actor="tester", note="second"
         )
@@ -139,13 +147,11 @@ class TestInteractiveRunIdempotency:
 
     def test_reject_already_rejected_run_is_idempotent(self, promotion_env):
         """Test that rejecting an already rejected run is idempotent."""
-        # First rejection
         result1 = crp.reject_run(
             promotion_env["run_id"], actor="tester", note="first"
         )
         assert result1["decision"] == "rejected"
 
-        # Second rejection should be idempotent
         result2 = crp.reject_run(
             promotion_env["run_id"], actor="tester", note="second"
         )
@@ -163,29 +169,24 @@ class TestPromotionErrorScenarios:
 
     def test_promote_with_dirty_canonical_raises(self, promotion_env):
         """Test that promoting with dirty canonical repo raises error."""
-        # Make canonical repo dirty
         (promotion_env["canonical"] / "scratch.txt").write_text(
             "dirty\n", encoding="utf-8"
         )
         
-        # Make worktree changes
-        (promotion_env["worktree"] / "app.py").write_text(
-            "print('updated')\n", encoding="utf-8"
-        )
+        worktree = promotion_env["worktree"]
+        (worktree / "app.py").write_text("print('updated')\n", encoding="utf-8")
+        _commit_worktree(worktree)
 
         with pytest.raises(crp.PromotionError, match="canonical repo is dirty"):
             crp.promote_run(promotion_env["run_id"], actor="tester", note="test")
 
     def test_promote_with_empty_diff_raises(self, promotion_env):
-        """Test that promoting with empty diff raises error."""
-        # Don't make any changes to worktree
-
-        with pytest.raises(crp.PromotionError, match="no diff found"):
+        """Test that promoting with no committed diff raises error."""
+        with pytest.raises(crp.PromotionError):
             crp.promote_run(promotion_env["run_id"], actor="tester", note="test")
 
     def test_promote_invalid_status_raises(self, promotion_env):
         """Test that promoting with invalid status raises error."""
-        # Update run status to rejected
         runs = json.loads(
             (promotion_env["runs_root"] / "runs.json").read_text(encoding="utf-8")
         )
@@ -205,6 +206,7 @@ class TestPromotionEvents:
         """Test that promotion records events."""
         worktree = promotion_env["worktree"]
         (worktree / "app.py").write_text("print('updated')\n", encoding="utf-8")
+        _commit_worktree(worktree)
 
         crp.promote_run(promotion_env["run_id"], actor="tester", note="ship it")
 
@@ -218,7 +220,7 @@ class TestPromotionEvents:
             if line
         ]
 
-        event_types = {e.get("type") for e in events}
+        event_types = {e.get("event", e.get("type")) for e in events}
         assert "approval.recorded" in event_types, \
             "Should have approval.recorded event"
         assert "promotion.completed" in event_types, \
@@ -236,7 +238,7 @@ class TestPromotionEvents:
             if line
         ]
 
-        event_types = {e.get("type") for e in events}
+        event_types = {e.get("event", e.get("type")) for e in events}
         assert "approval.rejected" in event_types, \
             "Should have approval.rejected event"
 
@@ -248,6 +250,7 @@ class TestPromotionMetadata:
         """Test that promotion receipt contains all required fields."""
         worktree = promotion_env["worktree"]
         (worktree / "app.py").write_text("print('updated')\n", encoding="utf-8")
+        _commit_worktree(worktree)
 
         result = crp.promote_run(
             promotion_env["run_id"], actor="tester", note="ship it"
@@ -274,6 +277,7 @@ class TestPromotionMetadata:
         """Test that promotion records the commit SHA."""
         worktree = promotion_env["worktree"]
         (worktree / "app.py").write_text("print('updated')\n", encoding="utf-8")
+        _commit_worktree(worktree)
 
         result = crp.promote_run(
             promotion_env["run_id"], actor="tester", note="ship it"

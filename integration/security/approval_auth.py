@@ -6,6 +6,7 @@ for all state-changing approval/promotion endpoints.
 
 from __future__ import annotations
 
+import hmac
 import os
 
 from fastapi import Header, HTTPException
@@ -24,5 +25,5 @@ def require_approval_token(authorization: str | None = Header(default=None)) -> 
             status_code=500,
             detail="approval token not configured (set ORACLE_APPROVAL_TOKEN)",
         )
-    if authorization != f"Bearer {expected}":
+    if not hmac.compare_digest(authorization or "", f"Bearer {expected}"):
         raise HTTPException(status_code=401, detail="unauthorized")

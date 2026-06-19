@@ -16,6 +16,12 @@ import pytest
 from scripts import coding_run_promotion as crp
 
 
+def _commit_worktree(worktree):
+    """Commit all changes in the worktree so HEAD~1..HEAD captures the diff."""
+    subprocess.run(["git", "-C", str(worktree), "add", "."], check=True, capture_output=True, text=True)
+    subprocess.run(["git", "-C", str(worktree), "commit", "-m", "wip"], check=True, capture_output=True, text=True)
+
+
 class TestAutonomousRunRejection:
     """Tests for autonomous run rejection functionality."""
 
@@ -52,7 +58,7 @@ class TestAutonomousRunRejection:
         events_content = events_path.read_text(encoding="utf-8")
         events = [json.loads(line) for line in events_content.strip().split("\n") if line]
         
-        rejection_events = [e for e in events if e.get("type") == "approval.rejected"]
+        rejection_events = [e for e in events if e.get("event") == "approval.rejected" or e.get("type") == "approval.rejected"]
         assert len(rejection_events) > 0, \
             "Should have at least one rejection event"
 
@@ -99,26 +105,23 @@ class TestAutonomousRunErrorScenarios:
         """Test that rejecting an already applied run raises error."""
         worktree = promotion_env["worktree"]
         (worktree / "app.py").write_text("print('updated')\n", encoding="utf-8")
+        _commit_worktree(worktree)
 
-        # First promote the run
         crp.promote_run(promotion_env["run_id"], actor="tester", note="promote")
 
-        # Then try to reject it
         with pytest.raises(crp.PromotionError, match="already applied"):
             crp.reject_run(promotion_env["run_id"], actor="tester", note="try reject")
 
     def test_reject_run_with_invalid_status_raises(self, promotion_env):
         """Test that rejecting a run with invalid status raises error."""
-        # Update run status to something that cannot be rejected
         runs = json.loads(
             (promotion_env["runs_root"] / "runs.json").read_text(encoding="utf-8")
         )
-        runs[0]["status"] = "running"  # Cannot reject a run that is still running
+        runs[0]["status"] = "running"
         (promotion_env["runs_root"] / "runs.json").write_text(
             json.dumps(runs, indent=2), encoding="utf-8"
         )
 
-        # Should raise because running is not a rejectable status
         with pytest.raises(crp.PromotionError, match="not awaiting approval"):
             crp.reject_run(promotion_env["run_id"], actor="tester", note="test")
 
@@ -130,6 +133,7 @@ class TestAutonomousRunApproval:
         """Test that autonomous runs can be promoted (approved)."""
         worktree = promotion_env["worktree"]
         (worktree / "app.py").write_text("print('autonomous update')\n", encoding="utf-8")
+        _commit_worktree(worktree)
 
         result = crp.promote_run(promotion_env["run_id"], actor="tester", note="approve")
 
@@ -141,6 +145,7 @@ class TestAutonomousRunApproval:
         worktree = promotion_env["worktree"]
         new_content = "print('autonomous update')\n"
         (worktree / "app.py").write_text(new_content, encoding="utf-8")
+        _commit_worktree(worktree)
 
         crp.promote_run(promotion_env["run_id"], actor="tester", note="approve")
 
@@ -152,6 +157,7 @@ class TestAutonomousRunApproval:
         """Test that promotion records a receipt."""
         worktree = promotion_env["worktree"]
         (worktree / "app.py").write_text("print('updated')\n", encoding="utf-8")
+        _commit_worktree(worktree)
 
         result = crp.promote_run(promotion_env["run_id"], actor="tester", note="approve")
 

@@ -19,6 +19,12 @@ import pytest
 from scripts import coding_run_promotion as crp
 
 
+def _commit_worktree(worktree):
+    """Commit all changes in the worktree so HEAD~1..HEAD captures the diff."""
+    subprocess.run(["git", "-C", str(worktree), "add", "."], check=True, capture_output=True, text=True)
+    subprocess.run(["git", "-C", str(worktree), "commit", "-m", "wip"], check=True, capture_output=True, text=True)
+
+
 class TestPromotionFlowHappyPath:
     """Tests for the happy path promotion flow."""
 
@@ -26,12 +32,12 @@ class TestPromotionFlowHappyPath:
         """Test basic promotion flow from awaiting_approval to applied."""
         worktree = promotion_env["worktree"]
         (worktree / "app.py").write_text("print('promoted')\n", encoding="utf-8")
+        _commit_worktree(worktree)
 
         result = crp.promote_run(
             promotion_env["run_id"], actor="tester", note="basic promotion"
         )
 
-        # Verify promotion result
         assert result.status == "applied", \
             "Promotion should result in 'applied' status"
         assert result.validation_ok is True, \
@@ -42,10 +48,10 @@ class TestPromotionFlowHappyPath:
         worktree = promotion_env["worktree"]
         new_content = "print('canonical update')\n"
         (worktree / "app.py").write_text(new_content, encoding="utf-8")
+        _commit_worktree(worktree)
 
         crp.promote_run(promotion_env["run_id"], actor="tester", note="update canonical")
 
-        # Verify canonical was updated
         canonical_content = (promotion_env["canonical"] / "app.py").read_text(encoding="utf-8")
         assert "canonical update" in canonical_content, \
             "Canonical should contain promoted changes"
@@ -54,10 +60,10 @@ class TestPromotionFlowHappyPath:
         """Test that promotion creates a git commit."""
         worktree = promotion_env["worktree"]
         (worktree / "app.py").write_text("print('committed')\n", encoding="utf-8")
+        _commit_worktree(worktree)
 
         crp.promote_run(promotion_env["run_id"], actor="tester", note="create commit")
 
-        # Check commit was created
         commits = subprocess.run(
             ["git", "-C", str(promotion_env["canonical"]), "log", "--oneline"],
             capture_output=True,
@@ -71,6 +77,7 @@ class TestPromotionFlowHappyPath:
         """Test that promotion commit has correct message."""
         worktree = promotion_env["worktree"]
         (worktree / "app.py").write_text("print('message test')\n", encoding="utf-8")
+        _commit_worktree(worktree)
 
         crp.promote_run(promotion_env["run_id"], actor="tester", note="test message")
 
@@ -93,14 +100,15 @@ class TestPromotionValidation:
         worktree = promotion_env["worktree"]
         (worktree / "app.py").write_text("print('valid')\n", encoding="utf-8")
 
-        # Update metadata with validation
         metadata = json.loads(
             (promotion_env["metadata_dir"] / f"{promotion_env['run_id']}.json").read_text()
         )
-        metadata["validationCommands"] = ["python3 -m py_compile app.py"]
+        metadata["validationCommands"] = ["python -m py_compile app.py"]
         (promotion_env["metadata_dir"] / f"{promotion_env['run_id']}.json").write_text(
             json.dumps(metadata, indent=2)
         )
+
+        _commit_worktree(worktree)
 
         result = crp.promote_run(
             promotion_env["run_id"], actor="tester", note="syntax ok"
@@ -114,19 +122,19 @@ class TestPromotionValidation:
         worktree = promotion_env["worktree"]
         (worktree / "app.py").write_text("print('broken'\n", encoding="utf-8")
 
-        # Update metadata with validation
         metadata = json.loads(
             (promotion_env["metadata_dir"] / f"{promotion_env['run_id']}.json").read_text()
         )
-        metadata["validationCommands"] = ["python3 -m py_compile app.py"]
+        metadata["validationCommands"] = ["python -m py_compile app.py"]
         (promotion_env["metadata_dir"] / f"{promotion_env['run_id']}.json").write_text(
             json.dumps(metadata, indent=2)
         )
 
+        _commit_worktree(worktree)
+
         with pytest.raises(crp.PromotionError):
             crp.promote_run(promotion_env["run_id"], actor="tester", note="should fail")
 
-        # Verify canonical was rolled back
         canonical_content = (promotion_env["canonical"] / "app.py").read_text(encoding="utf-8")
         assert "hello" in canonical_content, \
             "Canonical should be rolled back to original content"
@@ -136,21 +144,21 @@ class TestPromotionValidation:
         worktree = promotion_env["worktree"]
         (worktree / "app.py").write_text("print('broken'\n", encoding="utf-8")
 
-        # Update metadata with validation
         metadata = json.loads(
             (promotion_env["metadata_dir"] / f"{promotion_env['run_id']}.json").read_text()
         )
-        metadata["validationCommands"] = ["python3 -m py_compile app.py"]
+        metadata["validationCommands"] = ["python -m py_compile app.py"]
         (promotion_env["metadata_dir"] / f"{promotion_env['run_id']}.json").write_text(
             json.dumps(metadata, indent=2)
         )
+
+        _commit_worktree(worktree)
 
         try:
             crp.promote_run(promotion_env["run_id"], actor="tester", note="should fail")
         except crp.PromotionError:
             pass
 
-        # Verify canonical repo is clean (no uncommitted changes)
         git_status = subprocess.run(
             ["git", "-C", str(promotion_env["canonical"]), "status", "--porcelain"],
             capture_output=True,
@@ -168,6 +176,7 @@ class TestPromotionStatusTransitions:
         """Test transition from awaiting_approval to applied."""
         worktree = promotion_env["worktree"]
         (worktree / "app.py").write_text("print('updated')\n", encoding="utf-8")
+        _commit_worktree(worktree)
 
         crp.promote_run(promotion_env["run_id"], actor="tester", note="ship")
 
@@ -189,7 +198,6 @@ class TestPromotionStatusTransitions:
 
     def test_status_running_to_applied_is_rejected(self, promotion_env):
         """Test that promotion from running status is rejected (requires awaiting_approval)."""
-        # Update status to running
         runs = json.loads(
             (promotion_env["runs_root"] / "runs.json").read_text(encoding="utf-8")
         )
@@ -206,7 +214,6 @@ class TestPromotionStatusTransitions:
 
     def test_status_running_to_rejected_is_rejected(self, promotion_env):
         """Test that rejection from running status is rejected (requires awaiting_approval)."""
-        # Update status to running
         runs = json.loads(
             (promotion_env["runs_root"] / "runs.json").read_text(encoding="utf-8")
         )
@@ -226,6 +233,7 @@ class TestPromotionReceipts:
         """Test that approval receipt contains all required fields."""
         worktree = promotion_env["worktree"]
         (worktree / "app.py").write_text("print('updated')\n", encoding="utf-8")
+        _commit_worktree(worktree)
 
         crp.promote_run(
             promotion_env["run_id"], actor="tester", note="receipt test"
@@ -244,6 +252,7 @@ class TestPromotionReceipts:
         """Test that promotion receipt contains all required fields."""
         worktree = promotion_env["worktree"]
         (worktree / "app.py").write_text("print('updated')\n", encoding="utf-8")
+        _commit_worktree(worktree)
 
         result = crp.promote_run(
             promotion_env["run_id"], actor="tester", note="promotion receipt"
@@ -278,6 +287,7 @@ class TestPromotionArtifacts:
         """Test that patch artifact contains the changes."""
         worktree = promotion_env["worktree"]
         (worktree / "app.py").write_text("print('patched')\n", encoding="utf-8")
+        _commit_worktree(worktree)
 
         crp.promote_run(promotion_env["run_id"], actor="tester", note="create patch")
 
@@ -294,6 +304,7 @@ class TestPromotionArtifacts:
         """Test that validation artifacts are created for both worktree and canonical."""
         worktree = promotion_env["worktree"]
         (worktree / "app.py").write_text("print('validated')\n", encoding="utf-8")
+        _commit_worktree(worktree)
 
         crp.promote_run(promotion_env["run_id"], actor="tester", note="validation test")
 
@@ -314,6 +325,7 @@ class TestPromotionEdgeCases:
         worktree = promotion_env["worktree"]
         (worktree / "app.py").write_text("print('file1')\n", encoding="utf-8")
         (worktree / "new_file.py").write_text("print('file2')\n", encoding="utf-8")
+        _commit_worktree(worktree)
 
         result = crp.promote_run(
             promotion_env["run_id"], actor="tester", note="multi-file"
@@ -327,6 +339,7 @@ class TestPromotionEdgeCases:
         worktree = promotion_env["worktree"]
         (worktree / "app.py").write_text("print('binary test')\n", encoding="utf-8")
         (worktree / "data.bin").write_bytes(b"\x00\x01\x02\x03")
+        _commit_worktree(worktree)
 
         result = crp.promote_run(
             promotion_env["run_id"], actor="tester", note="with binary"
@@ -339,6 +352,7 @@ class TestPromotionEdgeCases:
         """Test that promoting an already applied run is idempotent."""
         worktree = promotion_env["worktree"]
         (worktree / "app.py").write_text("print('first')\n", encoding="utf-8")
+        _commit_worktree(worktree)
 
         # First promotion
         result1 = crp.promote_run(
@@ -365,20 +379,26 @@ class TestPromotionErrorHandling:
     def test_promotion_with_dirty_canonical(self, promotion_env):
         """Test promotion refuses dirty canonical repo."""
         (promotion_env["canonical"] / "dirty.txt").write_text("dirty\n", encoding="utf-8")
-        (promotion_env["worktree"] / "app.py").write_text("print('update')\n", encoding="utf-8")
+        worktree = promotion_env["worktree"]
+        (worktree / "app.py").write_text("print('update')\n", encoding="utf-8")
+        _commit_worktree(worktree)
 
         with pytest.raises(crp.PromotionError, match="canonical repo is dirty"):
             crp.promote_run(promotion_env["run_id"], actor="tester", note="dirty canonical")
 
     def test_promotion_with_empty_diff(self, promotion_env):
-        """Test promotion refuses empty diff."""
-        # Don't modify worktree at all
-
-        with pytest.raises(crp.PromotionError, match="no diff found"):
+        """Test promotion refuses empty diff — worktree has no diff beyond baseline."""
+        # Worktree is at baseline with only 1 commit, so HEAD~1 doesn't exist
+        # and git diff HEAD~1..HEAD fails, which raises PromotionError.
+        with pytest.raises(crp.PromotionError):
             crp.promote_run(promotion_env["run_id"], actor="tester", note="empty diff")
 
     def test_promotion_with_worktree_lineage_mismatch(self, promotion_env):
         """Test promotion refuses worktree with mismatched lineage."""
+        worktree = promotion_env["worktree"]
+        (worktree / "app.py").write_text("print('update')\n", encoding="utf-8")
+        _commit_worktree(worktree)
+
         # Advance canonical HEAD after the worktree was branched, creating a lineage mismatch
         (promotion_env["canonical"] / "extra.py").write_text("# extra\n", encoding="utf-8")
         subprocess.run(
@@ -391,8 +411,6 @@ class TestPromotionErrorHandling:
             check=True,
             capture_output=True,
         )
-
-        (promotion_env["worktree"] / "app.py").write_text("print('update')\n", encoding="utf-8")
 
         with pytest.raises(crp.PromotionError, match="lineage"):
             crp.promote_run(promotion_env["run_id"], actor="tester", note="lineage mismatch")

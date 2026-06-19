@@ -38,6 +38,7 @@ __version__ = "2.2.0"
 
 import argparse
 import base64
+import contextlib
 import hashlib
 import io
 import json
@@ -49,7 +50,7 @@ import tempfile
 import time
 import traceback
 import uuid
-from collections import defaultdict
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
@@ -267,8 +268,8 @@ class GroundingCache:
         return f"{image_hash}:{description.lower().strip()}"
     
     def _image_hash(self, image_b64: str) -> str:
-        """Compute fast hash of base64 image (first 1KB for speed)."""
-        return hashlib.md5(image_b64[:1024].encode()).hexdigest()
+        """Compute hash of base64 image using SHA-256."""
+        return hashlib.sha256(image_b64.encode()).hexdigest()[:16]
     
     def get(self, image_b64: str, description: str) -> Optional[dict]:
         """Get cached result if available and fresh."""
@@ -335,8 +336,7 @@ class AuditLogger:
     
     def __init__(self):
         self._lock = Lock()
-        self._events: list[dict] = []
-        self._max_events = 1000
+        self._events: deque[dict] = deque(maxlen=1000)
     
     def log(self, event_type: str, details: dict, severity: str = "info"):
         """Log a security event."""
@@ -349,9 +349,6 @@ class AuditLogger:
         
         with self._lock:
             self._events.append(event)
-            # Trim old events
-            if len(self._events) > self._max_events:
-                self._events = self._events[-self._max_events:]
         
         # Also log to stderr
         log(f"[AUDIT] {event_type}: {json.dumps(details)}")
@@ -359,7 +356,9 @@ class AuditLogger:
     def get_events(self, limit: int = 100) -> list[dict]:
         """Get recent audit events."""
         with self._lock:
-            return self._events[-limit:]
+            limit = max(1, min(1000, limit))
+            items = list(self._events)
+            return items[-limit:]
 
 
 _audit = AuditLogger()
@@ -428,6 +427,10 @@ class RateLimiter:
             self._requests[client_ip] = [
                 t for t in self._requests[client_ip] if now - t < self.window
             ]
+            # Evict empty entries to prevent memory leak
+            if not self._requests[client_ip]:
+                del self._requests[client_ip]
+                self._requests[client_ip] = []
             # Check if under limit
             if len(self._requests[client_ip]) < self.max_requests:
                 self._requests[client_ip].append(now)
@@ -648,94 +651,96 @@ def _vlm_ground(image_path: str, description: str, screen_w: float, screen_h: fl
     img: Any = Image.open(image_path)
     max_edge = 1280
     w, h = img.size
-    _f = tempfile.NamedTemporaryFile(suffix=".jpg", prefix="oracle_vlm_", delete=False)
-    resized_path = _f.name
-    _f.close()
-    if max(w, h) > max_edge:
-        scale = max_edge / max(w, h)
-        resample_method = getattr(Image, "Resampling", Image).LANCZOS
-        img = img.resize((int(w * scale), int(h * scale)), resample_method)
-    img.convert("RGB").save(resized_path, format="JPEG", quality=85)
-
-    # ShowUI-2B prompt format
-    system_text = (
-        "Based on the screenshot of the page, I give a text description and you give its "
-        "corresponding location. The coordinate represents a clickable location [x, y] for "
-        "an element, which is a relative coordinate on the screenshot, scaled from 0 to 1."
-    )
-    prompt = f"{system_text}\n{description}"
-
-    from mlx_vlm import stream_generate
-
-    # Build chat template
-    chat = [{"role": "user", "content": [
-        {"type": "image", "image": resized_path},
-        {"type": "text", "text": prompt}
-    ]}]
-    if _vlm_tokenizer is not None and hasattr(_vlm_tokenizer, "apply_chat_template"):
-        formatted = _vlm_tokenizer.apply_chat_template(
-            chat, tokenize=False, add_generation_prompt=True
-        )
-    else:
-        formatted = prompt
-
-    # Run inference
-    t0 = time.time()
-    full_text = ""
-    for result in stream_generate(
-        _vlm_model, _vlm_processor, formatted,
-        image=resized_path,
-        max_tokens=128,
-        temp=0.0
-    ):
-        full_text += result.text if hasattr(result, 'text') else str(result)
-
-    elapsed = time.time() - t0
-    log(f"VLM '{description}' -> '{full_text.strip()}' ({elapsed:.1f}s)")
-
-    # Clean up temp file
+    resized_path = None
     try:
-        os.unlink(resized_path)
-    except OSError:
-        pass
+        _f = tempfile.NamedTemporaryFile(suffix=".jpg", prefix="oracle_vlm_", delete=False)
+        resized_path = _f.name
+        _f.close()
+        if max(w, h) > max_edge:
+            scale = max_edge / max(w, h)
+            resample_method = getattr(Image, "Resampling", Image).LANCZOS
+            img = img.resize((int(w * scale), int(h * scale)), resample_method)
+        img.convert("RGB").save(resized_path, format="JPEG", quality=85)
 
-    # Parse [x, y] or (x, y) coordinates from model output
-    match = re.search(r'[\(\[]\s*([\d.]+)\s*,\s*([\d.]+)\s*[\)\]]', full_text)
-    if match:
-        nx, ny = float(match.group(1)), float(match.group(2))
-        if nx <= 1.0 and ny <= 1.0:
-            return {
-                "x": round(nx * screen_w, 1),
-                "y": round(ny * screen_h, 1),
-                "normalized_x": round(nx, 4),
-                "normalized_y": round(ny, 4),
-                "confidence": 0.8,
-                "raw": full_text.strip(),
-                "inference_ms": int(elapsed * 1000),
-            }
+        # ShowUI-2B prompt format
+        system_text = (
+            "Based on the screenshot of the page, I give a text description and you give its "
+            "corresponding location. The coordinate represents a clickable location [x, y] for "
+            "an element, which is a relative coordinate on the screenshot, scaled from 0 to 1."
+        )
+        prompt = f"{system_text}\n{description}"
+
+        from mlx_vlm import stream_generate
+
+        # Build chat template
+        chat = [{"role": "user", "content": [
+            {"type": "image", "image": resized_path},
+            {"type": "text", "text": prompt}
+        ]}]
+        if _vlm_tokenizer is not None and hasattr(_vlm_tokenizer, "apply_chat_template"):
+            formatted = _vlm_tokenizer.apply_chat_template(
+                chat, tokenize=False, add_generation_prompt=True
+            )
         else:
-            # Model returned pixel coordinates instead of normalized
-            return {
-                "x": round(nx, 1),
-                "y": round(ny, 1),
-                "normalized_x": round(nx / screen_w, 4),
-                "normalized_y": round(ny / screen_h, 4),
-                "confidence": 0.6,
-                "raw": full_text.strip(),
-                "inference_ms": int(elapsed * 1000),
-            }
+            formatted = prompt
 
-    # Failed to parse coordinates
-    return {
-        "x": round(screen_w / 2, 1),
-        "y": round(screen_h / 2, 1),
-        "normalized_x": 0.5,
-        "normalized_y": 0.5,
-        "confidence": 0.0,
-        "raw": full_text.strip(),
-        "inference_ms": int(elapsed * 1000),
-        "error": "Failed to parse coordinates from model output",
-    }
+        # Run inference
+        t0 = time.time()
+        full_text = ""
+        for result in stream_generate(
+            _vlm_model, _vlm_processor, formatted,
+            image=resized_path,
+            max_tokens=128,
+            temp=0.0
+        ):
+            full_text += result.text if hasattr(result, 'text') else str(result)
+
+        elapsed = time.time() - t0
+        log(f"VLM '{description}' -> '{full_text.strip()}' ({elapsed:.1f}s)")
+
+        # Parse [x, y] or (x, y) coordinates from model output
+        match = re.search(r'[\(\[]\s*([\d.]+)\s*,\s*([\d.]+)\s*[\)\]]', full_text)
+        if match:
+            nx, ny = float(match.group(1)), float(match.group(2))
+            if nx <= 1.0 and ny <= 1.0:
+                return {
+                    "x": round(nx * screen_w, 1),
+                    "y": round(ny * screen_h, 1),
+                    "normalized_x": round(nx, 4),
+                    "normalized_y": round(ny, 4),
+                    "confidence": 0.8,
+                    "raw": full_text.strip(),
+                    "inference_ms": int(elapsed * 1000),
+                }
+            else:
+                # Model returned pixel coordinates instead of normalized
+                return {
+                    "x": round(nx, 1),
+                    "y": round(ny, 1),
+                    "normalized_x": round(nx / screen_w, 4),
+                    "normalized_y": round(ny / screen_h, 4),
+                    "confidence": 0.6,
+                    "raw": full_text.strip(),
+                    "inference_ms": int(elapsed * 1000),
+                }
+
+        # Failed to parse coordinates
+        return {
+            "x": round(screen_w / 2, 1),
+            "y": round(screen_h / 2, 1),
+            "normalized_x": 0.5,
+            "normalized_y": 0.5,
+            "confidence": 0.0,
+            "raw": full_text.strip(),
+            "inference_ms": int(elapsed * 1000),
+            "error": "Failed to parse coordinates from model output",
+        }
+    finally:
+        if resized_path:
+            try:
+                os.unlink(resized_path)
+            except OSError:
+                pass
 
 
 # ── Idle Timeout ──────────────────────────────────────────────────
@@ -915,7 +920,10 @@ class VisionHandler(BaseHTTPRequestHandler):
         if "?" in self.path:
             from urllib.parse import parse_qs
             params = parse_qs(self.path.split("?", 1)[1])
-            limit = int(params.get("limit", ["100"])[0])
+            try:
+                limit = max(1, min(1000, int(params.get("limit", ["100"])[0])))
+            except (ValueError, TypeError):
+                limit = 100
         
         _metrics.record_request("/audit", 200)
         self._send_json(200, {
@@ -1082,7 +1090,8 @@ class VisionHandler(BaseHTTPRequestHandler):
             self._send_json(200, result)
 
         except Exception as e:
-            log(f"ERROR in /ground: {type(e).__name__}")
+            log(f"ERROR in /ground: {type(e).__name__}: {e}")
+            traceback.print_exc(file=sys.stderr)
             _metrics.record_request("/ground", 500)
             _audit.log("ground_error", {"error": str(e), "request_id": request_id}, severity="error")
             self._send_json(500, {"error": "Internal processing error", "request_id": request_id})
@@ -1133,7 +1142,8 @@ class VisionHandler(BaseHTTPRequestHandler):
             
             self._send_json(200, result)
         except Exception as e:
-            log(f"ERROR in /parse: {type(e).__name__}")
+            log(f"ERROR in /parse: {type(e).__name__}: {e}")
+            traceback.print_exc(file=sys.stderr)
             _metrics.record_request("/parse", 500)
             _audit.log("parse_error", {"error": str(e), "request_id": request_id}, severity="error")
             self._send_json(500, {"error": "Internal processing error", "request_id": request_id})
@@ -1187,7 +1197,8 @@ class VisionHandler(BaseHTTPRequestHandler):
                 "request_id": request_id,
             })
         except Exception as e:
-            log(f"ERROR in /detect: {type(e).__name__}")
+            log(f"ERROR in /detect: {type(e).__name__}: {e}")
+            traceback.print_exc(file=sys.stderr)
             _metrics.record_request("/detect", 500)
             _audit.log("detect_error", {"error": str(e), "request_id": request_id}, severity="error")
             self._send_json(500, {"error": "Internal processing error", "request_id": request_id})
@@ -1300,7 +1311,8 @@ class VisionHandler(BaseHTTPRequestHandler):
             })
             
         except Exception as e:
-            log(f"ERROR in /ground_batch: {type(e).__name__}")
+            log(f"ERROR in /ground_batch: {type(e).__name__}: {e}")
+            traceback.print_exc(file=sys.stderr)
             _metrics.record_request("/ground_batch", 500)
             _audit.log("ground_batch_error", {"error": str(e), "request_id": request_id}, severity="error")
             self._send_json(500, {"error": "Internal processing error", "request_id": request_id})
@@ -1396,7 +1408,8 @@ class VisionHandler(BaseHTTPRequestHandler):
                 "request_id": request_id,
             })
         except Exception as e:
-            log(f"ERROR in /diff: {type(e).__name__}")
+            log(f"ERROR in /diff: {type(e).__name__}: {e}")
+            traceback.print_exc(file=sys.stderr)
             _metrics.record_request("/diff", 500)
             _audit.log("diff_error", {"error": str(e), "request_id": request_id}, severity="error")
             self._send_json(500, {"error": "Internal processing error", "request_id": request_id})
@@ -1404,7 +1417,23 @@ class VisionHandler(BaseHTTPRequestHandler):
     def _handle_reload(self, request_id: str):
         """
         Hot-reload the VLM model without restarting the server.
+        Restricted to localhost only.
         """
+        # Security: restrict /reload to localhost
+        client_ip = self.client_address[0]
+        if client_ip not in ("127.0.0.1", "::1"):
+            _audit.log("reload_forbidden", {
+                "client_ip": client_ip,
+                "request_id": request_id,
+            }, severity="warning")
+            _metrics.record_request("/reload", 403)
+            self._send_json(403, {
+                "status": "error",
+                "message": "Forbidden: /reload is restricted to localhost",
+                "request_id": request_id,
+            })
+            return
+
         _audit.log("model_reload_requested", {"request_id": request_id})
         success, message = _reload_vlm()
         

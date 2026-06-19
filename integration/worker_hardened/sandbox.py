@@ -44,8 +44,6 @@ class SandboxConfig:
     blocked_paths: tuple[str, ...] = (
         "/etc",
         "/usr",
-        "/var",
-        "/tmp",
         "/home",
         "/root",
         "/opt",
@@ -126,18 +124,19 @@ class SecuritySandbox:
         """Validate that a path is allowed."""
         try:
             resolved = Path(path).resolve()
-            path_str = str(resolved)
             
-            # Check blocked paths
+            # Check blocked paths using proper directory matching
             for blocked in self.config.blocked_paths:
-                if path_str.startswith(blocked):
+                blocked_path = Path(blocked).resolve()
+                if resolved == blocked_path or str(resolved).startswith(str(blocked_path) + os.sep):
                     self._log_violation("blocked_path", f"Access to {path} blocked")
                     return False
             
             # Check allowed paths (if specified)
             if self.config.allowed_paths:
                 for allowed in self.config.allowed_paths:
-                    if path_str.startswith(allowed):
+                    allowed_path = Path(allowed).resolve()
+                    if resolved == allowed_path or str(resolved).startswith(str(allowed_path) + os.sep):
                         return True
                 self._log_violation("path_not_allowed", f"Path {path} not in allowed list")
                 return False
@@ -205,8 +204,11 @@ _sandbox: Optional[SecuritySandbox] = None
 def get_sandbox(config: Optional[SandboxConfig] = None) -> SecuritySandbox:
     """Get or create the global sandbox instance."""
     global _sandbox
-    if _sandbox is None:
-        _sandbox = SecuritySandbox(config)
+    if _sandbox is not None:
+        if config is not None and config != _sandbox.config:
+            raise RuntimeError("Sandbox already initialized with different config")
+        return _sandbox
+    _sandbox = SecuritySandbox(config)
     return _sandbox
 
 
@@ -258,7 +260,7 @@ class SandboxedFileWriter:
                 return False
             
             # Ensure path is within base_path
-            if not str(target_path).startswith(str(self.base_path)):
+            if not (target_path == self.base_path or str(target_path).startswith(str(self.base_path) + os.sep)):
                 self.sandbox._log_violation(
                     "path_escape",
                     f"Path {relative_path} escapes base path"
@@ -295,7 +297,7 @@ class SandboxedFileWriter:
                 return None
             
             # Ensure path is within base_path
-            if not str(target_path).startswith(str(self.base_path)):
+            if not (target_path == self.base_path or str(target_path).startswith(str(self.base_path) + os.sep)):
                 self.sandbox._log_violation(
                     "path_escape",
                     f"Path {relative_path} escapes base path"

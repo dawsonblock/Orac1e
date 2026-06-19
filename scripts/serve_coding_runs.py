@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-import json
+import re
+import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -8,6 +10,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 
 from integration.security.approval_auth import require_approval_token
+from integration.shared_json import append_jsonl, read_json, read_jsonl, write_json
 from scripts.coding_run_promotion import (
     APPROVALS_FILE,
     EVENTS_FILE,
@@ -23,28 +26,20 @@ RUNS_ROOT = ROOT / "workspace" / "runs"
 
 app = FastAPI(title="coding-runs")
 
-
-def _read_json(path: Path, default: Any) -> Any:
-    if not path.exists():
-        return default
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def _read_jsonl(path: Path) -> list[dict[str, Any]]:
-    if not path.exists():
-        return []
-    items = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        items.append(json.loads(line))
-    return items
+_RUN_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 
 class ApprovalBody(BaseModel):
     actor: str = "operator"
     note: str = ""
+
+
+class CreateRunBody(BaseModel):
+    repo_path: str
+    task: str
+    validation_commands: list[str] = ["pytest -q"]
+    mode: str = "commit"
+    allowed_paths: list[str] | None = None
 
 
 @app.get("/health")
@@ -56,11 +51,73 @@ def health() -> dict[str, str]:
 def ready() -> dict[str, str]:
     """Readiness check - verifies data stores are accessible."""
     try:
-        # Try to read runs file
-        _read_json(RUNS_FILE, [])
+        read_json(RUNS_FILE, [])
         return {"status": "ready"}
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"not ready: {e}")
+
+
+@app.post("/runs")
+def create_run(body: CreateRunBody) -> dict[str, Any]:
+    """Create a new coding run and record run.created event."""
+    if not body.repo_path or not body.task:
+        raise HTTPException(status_code=400, detail="repo_path and task are required")
+    if not body.validation_commands:
+        raise HTTPException(status_code=400, detail="validation_commands cannot be empty")
+    if body.mode not in ("commit", "sandbox"):
+        raise HTTPException(status_code=400, detail=f"mode must be 'commit' or 'sandbox', got '{body.mode}'")
+
+    now = datetime.now(timezone.utc).isoformat()
+    run_id = f"run-{int(datetime.now(timezone.utc).timestamp())}"
+
+    if not _RUN_ID_RE.match(run_id):
+        raise HTTPException(status_code=400, detail="invalid run_id generated")
+
+    run_dir = RUNS_ROOT / "runs" / run_id
+    if run_dir.exists():
+        raise HTTPException(status_code=409, detail="run already exists")
+
+    # Create run entry
+    run: dict[str, Any] = {
+        "id": run_id,
+        "repoPath": body.repo_path,
+        "task": body.task,
+        "validationCommands": body.validation_commands,
+        "status": "created",
+        "mode": body.mode,
+        "createdAt": now,
+        "updatedAt": now,
+    }
+    if body.allowed_paths is not None:
+        run["allowedPaths"] = body.allowed_paths
+
+    # Persist runs.json
+    runs_list = read_json(RUNS_FILE, [])
+    runs_list.append(run)
+    write_json(RUNS_FILE, runs_list)
+
+    # Create metadata file
+    run_dir.mkdir(parents=True, exist_ok=True)
+    metadata_dir = RUNS_ROOT / "metadata"
+    metadata_dir.mkdir(parents=True, exist_ok=True)
+    write_json(metadata_dir / f"{run_id}.json", run)
+
+    # Create worktree directory
+    (run_dir / "worktree").mkdir(parents=True, exist_ok=True)
+
+    # Record event
+    event = {"run_id": run_id, "event": "run.created", "timestamp": now, "task": body.task}
+    append_jsonl(EVENTS_FILE, event)
+
+    # Initialize git repo if repo_path exists
+    repo_path = ROOT / body.repo_path
+    if repo_path.is_dir():
+        if not (repo_path / ".git").exists():
+            subprocess.run(["git", "init", str(repo_path)], check=False, capture_output=True)
+            subprocess.run(["git", "-C", str(repo_path), "add", "."], check=False, capture_output=True)
+            subprocess.run(["git", "-C", str(repo_path), "commit", "-m", "initial fixture state"], check=False, capture_output=True)
+
+    return {"ok": True, "run_id": run_id, "status": "created"}
 
 
 def _enrich_run_with_detail(run: dict[str, Any]) -> dict[str, Any]:
@@ -69,9 +126,9 @@ def _enrich_run_with_detail(run: dict[str, Any]) -> dict[str, Any]:
     if not run_id:
         return run
     
-    events = [item for item in _read_jsonl(EVENTS_FILE) if item.get("runID") == run_id or item.get("run_id") == run_id]
-    approvals = [item for item in _read_jsonl(APPROVALS_FILE) if item.get("runID") == run_id or item.get("run_id") == run_id]
-    promotions = [item for item in _read_jsonl(PROMOTIONS_FILE) if item.get("runID") == run_id or item.get("run_id") == run_id]
+    events = [item for item in read_jsonl(EVENTS_FILE) if item.get("runID") == run_id or item.get("run_id") == run_id]
+    approvals = [item for item in read_jsonl(APPROVALS_FILE) if item.get("runID") == run_id or item.get("run_id") == run_id]
+    promotions = [item for item in read_jsonl(PROMOTIONS_FILE) if item.get("runID") == run_id or item.get("run_id") == run_id]
     
     enriched = dict(run)
     enriched["_events"] = events
@@ -83,14 +140,14 @@ def _enrich_run_with_detail(run: dict[str, Any]) -> dict[str, Any]:
 @app.get("/runs")
 def list_runs() -> list[dict[str, Any]]:
     """List all runs with enriched detail including events, approvals, and promotions."""
-    runs = _read_json(RUNS_FILE, [])
+    runs = read_json(RUNS_FILE, [])
     if not runs:
         return []
 
     # Build per-run-id indexes once instead of re-scanning JSONL files for every run.
     def _index_by_run(path: Path) -> dict[str, list[dict[str, Any]]]:
         idx: dict[str, list[dict[str, Any]]] = {}
-        for item in _read_jsonl(path):
+        for item in read_jsonl(path):
             key = item.get("runID") or item.get("run_id") or ""
             if key:
                 idx.setdefault(key, []).append(item)
@@ -114,7 +171,7 @@ def list_runs() -> list[dict[str, Any]]:
 @app.get("/runs/{run_id}")
 def get_run(run_id: str) -> dict[str, Any]:
     """Get a specific run with enriched detail including events, approvals, and promotions."""
-    for item in _read_json(RUNS_FILE, []):
+    for item in read_json(RUNS_FILE, []):
         if item.get("id") == run_id:
             return _enrich_run_with_detail(item)
     raise HTTPException(status_code=404, detail="run not found")
@@ -122,17 +179,17 @@ def get_run(run_id: str) -> dict[str, Any]:
 
 @app.get("/runs/{run_id}/events")
 def get_events(run_id: str) -> list[dict[str, Any]]:
-    return [item for item in _read_jsonl(EVENTS_FILE) if item.get("runID") == run_id or item.get("run_id") == run_id]
+    return [item for item in read_jsonl(EVENTS_FILE) if item.get("runID") == run_id or item.get("run_id") == run_id]
 
 
 @app.get("/runs/{run_id}/approvals")
 def get_approvals(run_id: str) -> list[dict[str, Any]]:
-    return [item for item in _read_jsonl(APPROVALS_FILE) if item.get("runID") == run_id or item.get("run_id") == run_id]
+    return [item for item in read_jsonl(APPROVALS_FILE) if item.get("runID") == run_id or item.get("run_id") == run_id]
 
 
 @app.get("/runs/{run_id}/promotions")
 def get_promotions(run_id: str) -> list[dict[str, Any]]:
-    return [item for item in _read_jsonl(PROMOTIONS_FILE) if item.get("runID") == run_id or item.get("run_id") == run_id]
+    return [item for item in read_jsonl(PROMOTIONS_FILE) if item.get("runID") == run_id or item.get("run_id") == run_id]
 
 
 @app.post("/runs/{run_id}/approve")

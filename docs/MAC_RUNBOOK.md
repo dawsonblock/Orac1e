@@ -55,7 +55,7 @@ Services started:
 - Retrieval broker: `http://127.0.0.1:8787`
 - Aider worker: `http://127.0.0.1:8788`
 - Hardened worker: `http://127.0.0.1:8789`
-- Run server: `http://127.0.0.1:8790`
+- Run server: `http://127.0.0.1:8080`
 
 ## Smoke Test
 
@@ -69,7 +69,7 @@ The fixture repo is at `workspace/fixtures/buggy-repo/` with a known `first_toke
 
 ```bash
 # Create a run
-curl -X POST http://127.0.0.1:8790/runs \
+curl -X POST http://127.0.0.1:8080/runs \
   -H "Content-Type: application/json" \
   -d '{
     "repo_path": "workspace/fixtures/buggy-repo",
@@ -85,7 +85,7 @@ Requires `ORACLE_APPROVAL_TOKEN` environment variable:
 ```bash
 export ORACLE_APPROVAL_TOKEN=your-secret-token
 
-curl -X POST http://127.0.0.1:8790/runs/{run_id}/approve \
+curl -X POST http://127.0.0.1:8080/runs/{run_id}/approve \
   -H "Authorization: Bearer $ORACLE_APPROVAL_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"actor": "operator", "note": "LGTM"}'
@@ -93,10 +93,23 @@ curl -X POST http://127.0.0.1:8790/runs/{run_id}/approve \
 
 Without token, returns 401.
 
+## Promote (What Happens After Approval)
+
+When you approve a run, the system automatically:
+
+1. **Validates the worktree** — runs your configured validation commands (e.g., `pytest`) against the worktree
+2. **Captures the patch** — diffs the worktree against its parent commit
+3. **Applies to canonical** — applies the patch to the canonical repository
+4. **Validates canonical** — runs the same validation commands against the canonical repo
+5. **Commits** — creates a promotion commit in the canonical repo
+6. **Records receipts** — writes approval and promotion receipts to `workspace/runs/`
+
+After promotion, the canonical repo has the fix and all tests pass.
+
 ## Reject a Run
 
 ```bash
-curl -X POST http://127.0.0.1:8790/runs/{run_id}/reject \
+curl -X POST http://127.0.0.1:8080/runs/{run_id}/reject \
   -H "Authorization: Bearer $ORACLE_APPROVAL_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"actor": "operator", "note": "Needs more work"}'
@@ -123,7 +136,7 @@ Run `./scripts/bootstrap_all.sh` first.
 Check if ports are in use:
 
 ```bash
-lsof -i :8787 -i :8788 -i :8789 -i :8790
+lsof -i :8787 -i :8788 -i :8789 -i :8080
 ```
 
 ### Vision sidecar won't start
@@ -147,6 +160,7 @@ export ORACLE_APPROVAL_TOKEN=your-secret-token
 Check `configs/command_policy.json` for allowed commands. Only these are permitted:
 
 - `pytest`
+- `python -m pytest`
 - `python -m compileall`
 - `ruff`
 - `swift test`

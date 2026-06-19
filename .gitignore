@@ -4,8 +4,8 @@ workspace/worktrees/*
 !workspace/worktrees/.gitkeep
 workspace/artifacts/*
 !workspace/artifacts/.gitkeep
-workspace/runs/*.json
-workspace/runs/*.jsonl
+workspace/runs/*
+!workspace/runs/.gitkeep
 *.log
 .DS_Store
 

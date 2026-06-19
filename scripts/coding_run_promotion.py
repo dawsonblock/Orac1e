@@ -5,6 +5,8 @@ import hashlib
 import json
 import logging
 import os
+import re
+import shlex
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -13,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from integration.lifecycle import transition
+from integration.shared_json import append_jsonl, read_json, read_jsonl, write_json
 
 logger = logging.getLogger(__name__)
 
@@ -56,39 +59,162 @@ class RunPaths:
     promotion_receipt_path: Path
 
 
+@dataclass
+class ApprovalRecord:
+    """An approval record for a run."""
+    run_id: str
+    decision: str  # "approved" or "rejected"
+    actor: str
+    note: str
+    timestamp: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "run_id": self.run_id,
+            "decision": self.decision,
+            "actor": self.actor,
+            "note": self.note,
+            "at": self.timestamp,
+        }
+
+
+@dataclass
+class RunState:
+    """Current state of a run including approvals."""
+    run_id: str
+    status: str
+    approvals: list[ApprovalRecord]
+    promotions: list[dict[str, Any]]
+    events: list[dict[str, Any]]
+
+
+class ApprovalStore:
+    """
+    Store for managing run approvals and promotions.
+
+    This is the primary interface for the approval flow:
+    - Query run state
+    - Record approvals
+    - Record rejections
+    - Execute promotions
+    """
+
+    def __init__(self, runs_root: Path | None = None) -> None:
+        self.runs_root = runs_root or RUNS_ROOT
+        self.runs_file = self.runs_root / "runs.json"
+        self.events_file = self.runs_root / "events.jsonl"
+        self.approvals_file = self.runs_root / "approvals.jsonl"
+        self.promotions_file = self.runs_root / "promotions.jsonl"
+
+    def get_run(self, run_id: str) -> dict[str, Any] | None:
+        """Get a run by ID."""
+        for item in read_json(self.runs_file, []):
+            if item.get("id") == run_id:
+                return item
+        return None
+
+    def get_run_state(self, run_id: str) -> RunState | None:
+        """Get full state of a run including approvals and events."""
+        run = self.get_run(run_id)
+        if not run:
+            return None
+
+        approvals = [
+            ApprovalRecord(
+                run_id=item.get("run_id", run_id),
+                decision=item.get("decision", ""),
+                actor=item.get("actor", ""),
+                note=item.get("note", ""),
+                timestamp=item.get("at", ""),
+            )
+            for item in read_jsonl(self.approvals_file)
+            if item.get("run_id") == run_id or item.get("runID") == run_id
+        ]
+
+        promotions = [
+            item for item in read_jsonl(self.promotions_file)
+            if item.get("run_id") == run_id or item.get("runID") == run_id
+        ]
+
+        events = [
+            item for item in read_jsonl(self.events_file)
+            if item.get("run_id") == run_id or item.get("runID") == run_id
+        ]
+
+        return RunState(
+            run_id=run_id,
+            status=run.get("status", "unknown"),
+            approvals=approvals,
+            promotions=promotions,
+            events=events,
+        )
+
+    def is_approved(self, run_id: str) -> bool:
+        """Check if a run has been approved."""
+        state = self.get_run_state(run_id)
+        if not state:
+            return False
+        return any(a.decision == "approved" for a in state.approvals)
+
+    def is_rejected(self, run_id: str) -> bool:
+        """Check if a run has been rejected."""
+        state = self.get_run_state(run_id)
+        if not state:
+            return False
+        return any(a.decision == "rejected" for a in state.approvals)
+
+    def list_runs(self) -> list[dict[str, Any]]:
+        """List all runs."""
+        return read_json(self.runs_file, [])
+
+    def list_awaiting_approval(self) -> list[dict[str, Any]]:
+        """List runs waiting for approval."""
+        runs = self.list_runs()
+        result = []
+        for run in runs:
+            run_id = run.get("id")
+            if not run_id:
+                continue
+            state = self.get_run_state(run_id)
+            if state and state.status == "awaiting_approval":
+                result.append(run)
+        return result
+
+
+# Global instance for convenience
+_default_store: ApprovalStore | None = None
+
+
+def get_store() -> ApprovalStore:
+    """Get the default approval store instance."""
+    global _default_store
+    if _default_store is None:
+        _default_store = ApprovalStore()
+    return _default_store
+
+
+def get_run_state(run_id: str) -> RunState | None:
+    """Get state of a run."""
+    return get_store().get_run_state(run_id)
+
+
+def is_approved(run_id: str) -> bool:
+    """Check if run is approved."""
+    return get_store().is_approved(run_id)
+
+
+def is_rejected(run_id: str) -> bool:
+    """Check if run is rejected."""
+    return get_store().is_rejected(run_id)
+
+
+def list_awaiting_approval() -> list[dict[str, Any]]:
+    """List runs waiting for approval."""
+    return get_store().list_awaiting_approval()
+
+
 def now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-
-
-def _read_json(path: Path, default: Any) -> Any:
-    if not path.exists():
-        return default
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def _write_json(path: Path, value: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    tmp.replace(path)
-
-
-def _read_jsonl(path: Path) -> list[dict[str, Any]]:
-    if not path.exists():
-        return []
-    items: list[dict[str, Any]] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        items.append(json.loads(line))
-    return items
-
-
-def _append_jsonl(path: Path, item: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(item, sort_keys=True) + "\n")
 
 
 def _run(
@@ -115,14 +241,15 @@ def _git(repo: Path, *args: str, check: bool = True, strip: bool = True) -> str:
 
 
 def _load_run(run_id: str) -> dict[str, Any]:
-    for item in _read_json(RUNS_FILE, []):
+    _validate_run_id(run_id)
+    for item in read_json(RUNS_FILE, []):
         if item.get("id") == run_id:
             return item
     raise PromotionError(f"run not found: {run_id}")
 
 
 def _replace_run(updated: dict[str, Any]) -> None:
-    runs = _read_json(RUNS_FILE, [])
+    runs = read_json(RUNS_FILE, [])
     replaced = False
     for idx, item in enumerate(runs):
         if item.get("id") == updated.get("id"):
@@ -131,10 +258,29 @@ def _replace_run(updated: dict[str, Any]) -> None:
             break
     if not replaced:
         raise PromotionError(f"run {updated.get('id')!r} not found in runs file; cannot replace")
-    _write_json(RUNS_FILE, runs)
+    write_json(RUNS_FILE, runs)
+
+
+_RUN_ID_RE = re.compile(r'^[a-zA-Z0-9_-]+$')
+
+_SHELL_METACHARACTERS = re.compile(r'[;&|`$(){}!\n\r]')
+
+
+def _validate_run_id(run_id: str) -> None:
+    """Raise PromotionError if run_id contains unsafe characters."""
+    if not run_id or not _RUN_ID_RE.fullmatch(run_id):
+        raise PromotionError(f"invalid run_id: {run_id!r}")
+
+
+def _validate_command_safety(command: str) -> str | None:
+    """Return error message if command contains shell metacharacters, else None."""
+    if _SHELL_METACHARACTERS.search(command):
+        return f"command contains shell metacharacters: {command!r}"
+    return None
 
 
 def _paths_for(run_id: str) -> RunPaths:
+    _validate_run_id(run_id)
     return RunPaths(
         metadata_path=RUN_METADATA_DIR / f"{run_id}.json",
         approval_receipt_path=RUNS_ROOT / "approvals" / f"{run_id}.json",
@@ -146,12 +292,12 @@ def _load_metadata(run_id: str) -> dict[str, Any]:
     paths = _paths_for(run_id)
     if not paths.metadata_path.exists():
         raise PromotionError(f"run metadata missing: {paths.metadata_path}")
-    return _read_json(paths.metadata_path, {})
+    return read_json(paths.metadata_path, {})
 
 
 def _record_event(run_id: str, event_type: str, payload: dict[str, Any] | None = None) -> None:
     ts = now_iso()
-    _append_jsonl(
+    append_jsonl(
         EVENTS_FILE,
         {
             "id": f"{run_id}:{event_type}:{ts}",
@@ -171,14 +317,14 @@ def _record_approval(run_id: str, decision: str, actor: str, note: str) -> dict[
         "note": note,
         "at": now_iso(),
     }
-    _append_jsonl(APPROVALS_FILE, receipt)
-    _write_json(_paths_for(run_id).approval_receipt_path, receipt)
+    append_jsonl(APPROVALS_FILE, receipt)
+    write_json(_paths_for(run_id).approval_receipt_path, receipt)
     return receipt
 
 
 def _record_promotion(run_id: str, receipt: dict[str, Any]) -> None:
-    _append_jsonl(PROMOTIONS_FILE, receipt)
-    _write_json(_paths_for(run_id).promotion_receipt_path, receipt)
+    append_jsonl(PROMOTIONS_FILE, receipt)
+    write_json(_paths_for(run_id).promotion_receipt_path, receipt)
 
 
 def _repo_is_clean(repo: Path) -> bool:
@@ -316,6 +462,21 @@ def _run_validation(repo: Path, commands: list[str]) -> dict[str, Any]:
             steps.append(step)
             return {"ok": False, "steps": steps, "environment": environment}
 
+        # Block commands with shell metacharacters to prevent injection
+        safety_error = _validate_command_safety(command)
+        if safety_error:
+            step = {
+                "name": command,
+                "ok": False,
+                "stdout": "",
+                "stderr": f"BLOCKED by safety check: {safety_error}",
+                "exitCode": 126,
+                "blocked": True,
+                "block_reason": safety_error,
+            }
+            steps.append(step)
+            return {"ok": False, "steps": steps, "environment": environment}
+
         proc = subprocess.run(
             ["/bin/bash", "-lc", command],
             cwd=repo,
@@ -338,7 +499,7 @@ def _run_validation(repo: Path, commands: list[str]) -> dict[str, Any]:
 
 def _write_validation_artifact(run_id: str, validation: dict[str, Any], kind: str) -> str:
     path = RUNS_ROOT / "validation" / f"{run_id}.{kind}.json"
-    _write_json(path, validation)
+    write_json(path, validation)
     return str(path)
 
 
@@ -444,7 +605,7 @@ def promote_run(
         # Already applied - return existing promotion receipt (no worktree needed for idempotent path)
         paths = _paths_for(run_id)
         if paths.promotion_receipt_path.exists():
-            existing_receipt = _read_json(paths.promotion_receipt_path, {})
+            existing_receipt = read_json(paths.promotion_receipt_path, {})
             return PromotionResult(
                 run_id=run_id,
                 canonical_repo=existing_receipt.get("canonical_repo", str(canonical_repo)),

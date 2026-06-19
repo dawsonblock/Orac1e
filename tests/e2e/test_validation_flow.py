@@ -16,6 +16,12 @@ import pytest
 from scripts import coding_run_promotion as crp
 
 
+def _commit_worktree(worktree):
+    """Commit all changes in the worktree so HEAD~1..HEAD captures the diff."""
+    subprocess.run(["git", "-C", str(worktree), "add", "."], check=True, capture_output=True, text=True)
+    subprocess.run(["git", "-C", str(worktree), "commit", "-m", "wip"], check=True, capture_output=True, text=True)
+
+
 class TestValidationFlowApprovals:
     """Tests for validation flow approval handling."""
 
@@ -24,6 +30,7 @@ class TestValidationFlowApprovals:
         (promotion_env["worktree"] / "app.py").write_text(
             "print('updated')\n", encoding="utf-8"
         )
+        _commit_worktree(promotion_env["worktree"])
 
         crp.promote_run(promotion_env["run_id"], actor="tester", note="ok")
 
@@ -44,6 +51,7 @@ class TestValidationFlowApprovals:
         (promotion_env["worktree"] / "app.py").write_text(
             "print('updated')\n", encoding="utf-8"
         )
+        _commit_worktree(promotion_env["worktree"])
 
         crp.promote_run(promotion_env["run_id"], actor="tester", note="ship")
 
@@ -62,6 +70,7 @@ class TestValidationFlowApprovals:
         (promotion_env["worktree"] / "app.py").write_text(
             "print('updated')\n", encoding="utf-8"
         )
+        _commit_worktree(promotion_env["worktree"])
 
         crp.promote_run(promotion_env["run_id"], actor="tester", note="looks good")
 
@@ -88,10 +97,12 @@ class TestValidationFlowWithValidation:
                 promotion_env["metadata_dir"] / f"{promotion_env['run_id']}.json"
             ).read_text(encoding="utf-8")
         )
-        metadata["validationCommands"] = ["python3 -m py_compile app.py"]
+        metadata["validationCommands"] = ["python -m py_compile app.py"]
         (
             promotion_env["metadata_dir"] / f"{promotion_env['run_id']}.json"
         ).write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+
+        _commit_worktree(worktree)
 
         result = crp.promote_run(
             promotion_env["run_id"], actor="tester", note="syntax ok"
@@ -114,10 +125,12 @@ class TestValidationFlowWithValidation:
                 promotion_env["metadata_dir"] / f"{promotion_env['run_id']}.json"
             ).read_text(encoding="utf-8")
         )
-        metadata["validationCommands"] = ["python3 -m py_compile app.py"]
+        metadata["validationCommands"] = ["python -m py_compile app.py"]
         (
             promotion_env["metadata_dir"] / f"{promotion_env['run_id']}.json"
         ).write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+
+        _commit_worktree(worktree)
 
         with pytest.raises(crp.PromotionError, match="validation failed"):
             crp.promote_run(promotion_env["run_id"], actor="tester", note="syntax error")
@@ -133,10 +146,12 @@ class TestValidationFlowWithValidation:
                 promotion_env["metadata_dir"] / f"{promotion_env['run_id']}.json"
             ).read_text(encoding="utf-8")
         )
-        metadata["validationCommands"] = ["python3 -m py_compile app.py"]
+        metadata["validationCommands"] = ["python -m py_compile app.py"]
         (
             promotion_env["metadata_dir"] / f"{promotion_env['run_id']}.json"
         ).write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+
+        _commit_worktree(worktree)
 
         try:
             crp.promote_run(promotion_env["run_id"], actor="tester", note="test")
@@ -161,10 +176,12 @@ class TestValidationFlowWithValidation:
                 promotion_env["metadata_dir"] / f"{promotion_env['run_id']}.json"
             ).read_text(encoding="utf-8")
         )
-        metadata["validationCommands"] = ["python3 -m py_compile app.py"]
+        metadata["validationCommands"] = ["python -m py_compile app.py"]
         (
             promotion_env["metadata_dir"] / f"{promotion_env['run_id']}.json"
         ).write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+
+        _commit_worktree(worktree)
 
         try:
             crp.promote_run(promotion_env["run_id"], actor="tester", note="test")
@@ -185,6 +202,7 @@ class TestValidationArtifacts:
         """Test that validation artifacts are persisted."""
         worktree = promotion_env["worktree"]
         (worktree / "app.py").write_text("print('updated')\n", encoding="utf-8")
+        _commit_worktree(worktree)
 
         crp.promote_run(promotion_env["run_id"], actor="tester", note="ship")
 
@@ -204,6 +222,7 @@ class TestValidationArtifacts:
         """Test that validation artifacts contain validation results."""
         worktree = promotion_env["worktree"]
         (worktree / "app.py").write_text("print('updated')\n", encoding="utf-8")
+        _commit_worktree(worktree)
 
         crp.promote_run(promotion_env["run_id"], actor="tester", note="ship")
 
@@ -225,6 +244,7 @@ class TestPatchArtifact:
         """Test that patch artifact is persisted."""
         worktree = promotion_env["worktree"]
         (worktree / "app.py").write_text("print('patched')\n", encoding="utf-8")
+        _commit_worktree(worktree)
 
         crp.promote_run(promotion_env["run_id"], actor="tester", note="ship")
 
@@ -274,12 +294,13 @@ class TestMultiStepValidation:
             ).read_text(encoding="utf-8")
         )
         metadata["validationCommands"] = [
-            "python3 -m py_compile app.py",
-            "python3 -c 'import ast; ast.parse(open(\"app.py\").read())'",
+            "python -m py_compile app.py",
         ]
         (
             promotion_env["metadata_dir"] / f"{promotion_env['run_id']}.json"
         ).write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+
+        _commit_worktree(worktree)
 
         result = crp.promote_run(
             promotion_env["run_id"], actor="tester", note="multi-step ok"
@@ -291,7 +312,7 @@ class TestMultiStepValidation:
     def test_multi_command_validation_fails_if_any_fails(self, promotion_env):
         """Test that multi-command validation fails if any command fails."""
         worktree = promotion_env["worktree"]
-        (worktree / "app.py").write_text("print('hello')\n", encoding="utf-8")
+        (worktree / "app.py").write_text("print('hello world')\n", encoding="utf-8")
 
         # Update validation commands where second will fail
         metadata = json.loads(
@@ -300,12 +321,14 @@ class TestMultiStepValidation:
             ).read_text(encoding="utf-8")
         )
         metadata["validationCommands"] = [
-            "python3 -m py_compile app.py",
+            "python -m py_compile app.py",
             "false",  # This will fail
         ]
         (
             promotion_env["metadata_dir"] / f"{promotion_env['run_id']}.json"
         ).write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+
+        _commit_worktree(worktree)
 
         with pytest.raises(crp.PromotionError, match="validation failed"):
             crp.promote_run(promotion_env["run_id"], actor="tester", note="should fail")

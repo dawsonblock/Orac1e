@@ -18,6 +18,12 @@ import pytest
 from scripts import coding_run_promotion as crp
 
 
+def _commit_worktree(worktree):
+    """Commit all changes in the worktree so HEAD~1..HEAD captures the diff."""
+    subprocess.run(["git", "-C", str(worktree), "add", "."], check=True, capture_output=True, text=True)
+    subprocess.run(["git", "-C", str(worktree), "commit", "-m", "wip"], check=True, capture_output=True, text=True)
+
+
 class TestToolRegistryDirtyRepo:
     """Tests for tool registry interaction with dirty repositories."""
 
@@ -30,6 +36,7 @@ class TestToolRegistryDirtyRepo:
         (promotion_env["worktree"] / "app.py").write_text(
             "print('updated')\n", encoding="utf-8"
         )
+        _commit_worktree(promotion_env["worktree"])
 
         with pytest.raises(crp.PromotionError, match="canonical repo is dirty"):
             crp.promote_run(promotion_env["run_id"], actor="tester")
@@ -41,6 +48,7 @@ class TestToolRegistryDirtyRepo:
             "dirty\n", encoding="utf-8"
         )
         (worktree / "app.py").write_text("print('updated')\n", encoding="utf-8")
+        _commit_worktree(worktree)
 
         try:
             crp.promote_run(promotion_env["run_id"], actor="tester")
@@ -56,6 +64,7 @@ class TestToolRegistryDirtyRepo:
         """Test that clean canonical repo allows promotion."""
         worktree = promotion_env["worktree"]
         (worktree / "app.py").write_text("print('clean')\n", encoding="utf-8")
+        _commit_worktree(worktree)
 
         # Ensure canonical is clean (default state)
         result = crp.promote_run(promotion_env["run_id"], actor="tester")
@@ -104,6 +113,7 @@ class TestToolRegistryValidationIntegration:
         """Test promotion respects allowed paths configuration."""
         worktree = promotion_env["worktree"]
         (worktree / "app.py").write_text("print('allowed')\n", encoding="utf-8")
+        _commit_worktree(worktree)
 
         result = crp.promote_run(
             promotion_env["run_id"], actor="tester", note="allowed path"
@@ -134,6 +144,7 @@ class TestToolRegistryArtifacts:
         """Test that promotion creates approvals directory."""
         worktree = promotion_env["worktree"]
         (worktree / "app.py").write_text("print('updated')\n", encoding="utf-8")
+        _commit_worktree(worktree)
 
         crp.promote_run(promotion_env["run_id"], actor="tester", note="ship")
 
@@ -145,6 +156,7 @@ class TestToolRegistryArtifacts:
         """Test that promotion creates promotions directory."""
         worktree = promotion_env["worktree"]
         (worktree / "app.py").write_text("print('updated')\n", encoding="utf-8")
+        _commit_worktree(worktree)
 
         crp.promote_run(promotion_env["run_id"], actor="tester", note="ship")
 
@@ -156,6 +168,7 @@ class TestToolRegistryArtifacts:
         """Test that promotion creates artifacts directory."""
         worktree = promotion_env["worktree"]
         (worktree / "app.py").write_text("print('updated')\n", encoding="utf-8")
+        _commit_worktree(worktree)
 
         crp.promote_run(promotion_env["run_id"], actor="tester", note="ship")
 
@@ -167,6 +180,7 @@ class TestToolRegistryArtifacts:
         """Test that promotion creates validation directory."""
         worktree = promotion_env["worktree"]
         (worktree / "app.py").write_text("print('updated')\n", encoding="utf-8")
+        _commit_worktree(worktree)
 
         crp.promote_run(promotion_env["run_id"], actor="tester", note="ship")
 
@@ -183,6 +197,7 @@ class TestToolRegistryReceipts:
         (promotion_env["worktree"] / "app.py").write_text(
             "print('updated')\n", encoding="utf-8"
         )
+        _commit_worktree(promotion_env["worktree"])
 
         crp.promote_run(promotion_env["run_id"], actor="tester", note="ship")
 
@@ -199,6 +214,7 @@ class TestToolRegistryReceipts:
         """Test that promotion receipt includes commit SHA."""
         worktree = promotion_env["worktree"]
         (worktree / "app.py").write_text("print('updated')\n", encoding="utf-8")
+        _commit_worktree(worktree)
 
         result = crp.promote_run(promotion_env["run_id"], actor="tester", note="ship")
 
@@ -235,6 +251,7 @@ class TestToolRegistryConcurrency:
         (promotion_env["worktree"] / "app.py").write_text(
             "print('updated')\n", encoding="utf-8"
         )
+        _commit_worktree(promotion_env["worktree"])
 
         with pytest.raises(crp.PromotionError):
             crp.promote_run(promotion_env["run_id"], actor="tester", note="try")
@@ -245,6 +262,7 @@ class TestToolRegistryConcurrency:
         (promotion_env["worktree"] / "app.py").write_text(
             "print('updated')\n", encoding="utf-8"
         )
+        _commit_worktree(promotion_env["worktree"])
         crp.promote_run(promotion_env["run_id"], actor="tester", note="promote")
 
         # Then try to reject

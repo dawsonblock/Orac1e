@@ -207,7 +207,6 @@ struct ApprovalQueueCard: View {
 
     @ViewBuilder
     private func approvalList(_ approvals: [ApprovalRequestDocument]) -> some View {
-        let bindableStore = Bindable(store)
         VStack(spacing: 10) {
             ForEach(approvals) { (approval: ApprovalRequestDocument) in
                 VStack(alignment: .leading, spacing: 8) {

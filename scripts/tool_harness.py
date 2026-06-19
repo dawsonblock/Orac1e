@@ -24,10 +24,10 @@ def main() -> int:
     print(json.dumps(result, indent=2))
 
     # Fail if any tool is unhealthy
-    if isinstance(result, dict):
-        for tool_id, info in result.items():
-            if isinstance(info, dict) and not info.get("healthy", True):
-                print(f"UNHEALTHY: {tool_id}", file=sys.stderr)
+    if isinstance(result, list):
+        for info in result:
+            if isinstance(info, dict) and not info.get("ok", True):
+                print(f"UNHEALTHY: {info.get('tool_id', '?')}", file=sys.stderr)
                 return 1
     return 0
 

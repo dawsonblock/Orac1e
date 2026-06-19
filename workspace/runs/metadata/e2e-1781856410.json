@@ -1,9 +1,0 @@
-{
-  "runID": "e2e-1781856410",
-  "repoPath": "/Users/dawsonblock/Downloads/Orac1e-main/workspace/fixtures/buggy-repo",
-  "task": "Fix first_token so empty input returns None while preserving non-empty behavior",
-  "validationCommands": ["python -m pytest tests/test_parser.py -v"],
-  "allowNoValidation": false,
-  "worktreePath": "/Users/dawsonblock/Downloads/Orac1e-main/workspace/fixtures/worktree-e2e-1781856410",
-  "canonicalRepoPath": "/Users/dawsonblock/Downloads/Orac1e-main/workspace/fixtures/buggy-repo"
-}

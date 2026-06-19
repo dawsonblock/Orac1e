@@ -1,7 +1,0 @@
-{
-  "actor": "operator",
-  "at": "2026-06-19T08:10:02Z",
-  "decision": "approved",
-  "note": "E2E test: fix first_token",
-  "run_id": "e2e-1781856410"
-}

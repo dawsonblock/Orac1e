@@ -2,16 +2,20 @@
 
 Every validation command must pass through validate_command() before execution.
 Commands are checked against allow_prefixes and deny_prefixes from the policy file.
+Shell metacharacters (;, &&, ||, |, backticks, $(), >, <) are always blocked.
 """
 
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_POLICY_PATH = ROOT / "configs" / "command_policy.json"
+
+_SHELL_METACHAR_RE = re.compile(r"[;&|`$(){}!\n\r]")
 
 
 @dataclass(frozen=True)
@@ -34,13 +38,17 @@ def validate_command(command: str, policy: dict) -> CommandDecision:
 
     Order of evaluation:
     1. Empty command → denied
-    2. Deny prefixes checked first (deny wins over allow)
-    3. Allow prefixes checked second
-    4. No match → denied (fail-closed)
+    2. Shell metacharacters → always denied
+    3. Deny prefixes checked first (deny wins over allow)
+    4. Allow prefixes checked second
+    5. No match → denied (fail-closed)
     """
     command = command.strip()
     if not command:
         return CommandDecision(False, "empty command")
+
+    if _SHELL_METACHAR_RE.search(command):
+        return CommandDecision(False, "shell metacharacters blocked")
 
     for denied in policy.get("deny_prefixes", []):
         if command.startswith(denied):
