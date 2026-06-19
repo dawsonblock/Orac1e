@@ -1,0 +1,52 @@
+{
+  "actor": "operator",
+  "approval": {
+    "actor": "operator",
+    "recorded": true,
+    "timestamp": "2026-06-19T08:10:02Z"
+  },
+  "at": "2026-06-19T08:10:02Z",
+  "base_commit": "5168817e338c3286ca14c59bb16931b80d95351b",
+  "canonical_repo": "/Users/dawsonblock/Downloads/Orac1e-main/workspace/fixtures/buggy-repo",
+  "canonical_validation_ran": true,
+  "canonical_validation_skip_reason": null,
+  "note": "E2E test: fix first_token",
+  "patch": {
+    "exists": true,
+    "file_list": [
+      "src/parser.py"
+    ],
+    "files_changed": 1,
+    "lines_added": 2,
+    "lines_removed": 0
+  },
+  "patch_file": "/Users/dawsonblock/Downloads/Orac1e-main/workspace/runs/artifacts/e2e-1781856410.patch",
+  "promotion_commit": "4f32b9e995ebb86895f8f19b04023315d2f333fb",
+  "run_id": "e2e-1781856410",
+  "state_after": "applied",
+  "state_before": "awaiting_approval",
+  "status": "applied",
+  "validation": {
+    "canonical": {
+      "passed": true
+    },
+    "commands": [
+      "python -m pytest tests/test_parser.py -v"
+    ],
+    "error_category": null,
+    "mode": "full",
+    "ok": true,
+    "skip_reason": null,
+    "skipped": false,
+    "step_count": 1,
+    "unsafe_skip": false,
+    "worktree": {
+      "passed": true
+    }
+  },
+  "validation_ok": true,
+  "validation_profile_name": "default",
+  "validation_profile_version": 1,
+  "validation_stages_count": 0,
+  "worktree_repo": "/Users/dawsonblock/Downloads/Orac1e-main/workspace/fixtures/worktree-e2e-1781856410"
+}

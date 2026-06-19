@@ -187,9 +187,11 @@ def _repo_is_clean(repo: Path) -> bool:
 
 def _validate_worktree_lineage(canonical_repo: Path, worktree_repo: Path) -> str:
     canonical_head = _git(canonical_repo, "rev-parse", "HEAD")
-    worktree_head = _git(worktree_repo, "rev-parse", "HEAD")
-    if canonical_head != worktree_head:
-        raise PromotionError("worktree lineage mismatch: base commit no longer matches canonical HEAD; refusing promotion")
+    # The worktree's parent (first ancestor) should match canonical HEAD.
+    # The worktree itself may be ahead (has the fix), but its base must match.
+    worktree_base = _git(worktree_repo, "rev-parse", "HEAD^")
+    if canonical_head != worktree_base:
+        raise PromotionError("worktree lineage mismatch: worktree base commit does not match canonical HEAD; refusing promotion")
     return canonical_head
 
 
@@ -341,7 +343,8 @@ def _write_validation_artifact(run_id: str, validation: dict[str, Any], kind: st
 
 
 def _capture_patch(worktree_repo: Path, run_id: str) -> tuple[str, Path]:
-    patch_text = _git(worktree_repo, "diff", "--binary", strip=False)
+    # Diff the worktree's latest commit against its parent to capture the fix.
+    patch_text = _git(worktree_repo, "diff", "--binary", "HEAD~1..HEAD", strip=False)
     if not patch_text.strip():
         raise PromotionError("no diff found in worktree; refusing empty promotion")
 

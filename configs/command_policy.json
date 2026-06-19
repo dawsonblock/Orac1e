@@ -1,6 +1,7 @@
 {
   "allow_prefixes": [
     "pytest",
+    "python -m pytest",
     "python -m compileall",
     "ruff",
     "swift test",

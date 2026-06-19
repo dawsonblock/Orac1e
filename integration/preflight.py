@@ -73,7 +73,7 @@ def check() -> PreflightResult:
 
     if cfg.get("workers", {}).get("hardened", {}).get("enabled", False):
         try:
-            from runtime.common.config import RuntimeConfig  # noqa: F401
+            from runtime.common.config import SandboxConfig  # noqa: F401
         except Exception:
             result.errors.append("code-agent-runtime not installed (worker.hardened.enabled=true)")
             result.ok = False
@@ -147,7 +147,7 @@ def check_hardened_worker() -> None:
     cfg = load_config()
     if cfg.get("workers", {}).get("hardened", {}).get("enabled", True):
         try:
-            from runtime.common.config import RuntimeConfig  # noqa: F401
+            from runtime.common.config import SandboxConfig  # noqa: F401
         except Exception as exc:
             raise RuntimeError(f"code-agent-runtime not available: {exc}")
 

@@ -1,0 +1,17 @@
+{
+  "environment": {
+    "dependencies_hash": "743393f519080dcc5ef2a5001237a26dba9cfc6c807dba9bf689ba773a32ae75",
+    "node_version": "v22.22.3",
+    "python_version": "Python 3.12.0"
+  },
+  "ok": true,
+  "steps": [
+    {
+      "exitCode": 0,
+      "name": "python -m pytest tests/test_parser.py -v",
+      "ok": true,
+      "stderr": "",
+      "stdout": "============================= test session starts ==============================\nplatform darwin -- Python 3.12.0, pytest-8.4.2, pluggy-1.6.0 -- /Users/dawsonblock/.pyenv/versions/3.12.0/bin/python\ncachedir: .pytest_cache\nhypothesis profile 'default'\nrootdir: /Users/dawsonblock/Downloads/Orac1e-main\nconfigfile: pyproject.toml\nplugins: anyio-4.12.1, astropy-0.11.0, mock-3.15.1, remotedata-0.4.1, xdist-3.8.0, timeout-2.4.0, filter-subpackage-0.2.0, hypothesis-6.151.4, astropy-header-0.2.2, asyncio-1.3.0, doctestplus-1.7.1, arraydiff-0.6.1, cov-7.0.0\nasyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function\ncollecting ... collected 1 item\n\ntests/test_parser.py::test_empty_tokens_returns_none PASSED              [100%]\n\n============================== 1 passed in 0.11s ===============================\n"
+    }
+  ]
+}

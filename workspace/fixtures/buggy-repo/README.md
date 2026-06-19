@@ -1,3 +1,2 @@
-# Buggy fixture repo
-
-This repo intentionally contains a small parser bug so the end-to-end run path can be tested quickly.
+# Buggy Repo
+Fixture repo with a known first_token bug.
