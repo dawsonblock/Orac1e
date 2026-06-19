@@ -12,6 +12,9 @@
     "curl ",
     "wget ",
     "rm -rf",
-    "git push"
+    "git push",
+    "sudo ",
+    "chmod ",
+    "chown "
   ]
 }

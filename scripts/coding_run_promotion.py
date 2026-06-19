@@ -293,8 +293,27 @@ def _run_validation(repo: Path, commands: list[str]) -> dict[str, Any]:
             "error_category": "validation_unconfigured",
             "summary": "Validation configuration missing - no validation commands configured",
         }
+
+    # Load command policy for enforcement
+    from integration.security.command_policy import load_policy, validate_command
+    policy = load_policy()
+
     steps: list[dict[str, Any]] = []
     for command in commands:
+        decision = validate_command(command, policy)
+        if not decision.allowed:
+            step = {
+                "name": command,
+                "ok": False,
+                "stdout": "",
+                "stderr": f"BLOCKED by command policy: {decision.reason}",
+                "exitCode": 126,
+                "blocked": True,
+                "block_reason": decision.reason,
+            }
+            steps.append(step)
+            return {"ok": False, "steps": steps, "environment": environment}
+
         proc = subprocess.run(
             ["/bin/bash", "-lc", command],
             cwd=repo,
@@ -411,7 +430,7 @@ def promote_run(
         allow_no_validation
         or bool(metadata.get("allowNoValidation"))
         or _profile_allow_no
-        or os.environ.get("ORACLE_ALLOW_NO_VALIDATION") == "1"
+        or os.environ.get("ORACLE_UNSAFE_ALLOW_NO_VALIDATION") == "1"
     )
 
     # Normalized status vocabulary check - load immediately after run
@@ -453,6 +472,12 @@ def promote_run(
     
     if not has_validation and allow_no_validation:
         # Skip validation entirely if explicitly allowed
+        import sys
+        print(
+            "UNSAFE: validation was skipped. This run cannot be promoted "
+            "unless unsafe promotion is explicitly enabled.",
+            file=sys.stderr,
+        )
         commands_to_run: list[str] = []
         pre_validation = {
             "ok": True,
@@ -460,6 +485,7 @@ def promote_run(
             "environment": _capture_environment(worktree_repo),
             "skipped": True,
             "skip_reason": "allow_no_validation",
+            "unsafe_skip": True,
         }
     else:
         # Flatten stages to commands for execution (backward compatible)
@@ -570,6 +596,7 @@ def promote_run(
                 "step_count": len(pre_validation.get("steps", [])),
                 "skipped": bool(pre_validation.get("skipped")),
                 "skip_reason": pre_validation.get("skip_reason"),
+                "unsafe_skip": bool(pre_validation.get("unsafe_skip")),
                 "error_category": pre_validation.get("error_category"),
                 "commands": commands_to_run,
                 "worktree": {

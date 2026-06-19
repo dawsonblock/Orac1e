@@ -9,6 +9,25 @@ workspace/runs/*.jsonl
 *.log
 .DS_Store
 
+# Python bytecode
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.pyc
+
+# Tool caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Environment and build artifacts
+.env
+dist/
+build/
+*.sqlite
+*.db
+*.tar.gz
+
 # Prevent editable-install artifacts inside vendored third_party from
 # polluting every Python environment on the machine via sys.path scanning.
 third_party/**/*.egg-info/

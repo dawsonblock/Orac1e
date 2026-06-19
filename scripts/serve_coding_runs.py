@@ -4,9 +4,10 @@ import json
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 
+from integration.security.approval_auth import require_approval_token
 from scripts.coding_run_promotion import (
     APPROVALS_FILE,
     EVENTS_FILE,
@@ -135,7 +136,7 @@ def get_promotions(run_id: str) -> list[dict[str, Any]]:
 
 
 @app.post("/runs/{run_id}/approve")
-def approve(run_id: str, body: ApprovalBody) -> dict[str, Any]:
+def approve(run_id: str, body: ApprovalBody, _auth: None = Depends(require_approval_token)) -> dict[str, Any]:
     """
     Approve a coding run with idempotency guard.
     Returns enriched run detail with events, approvals, and promotions.
@@ -171,7 +172,7 @@ def approve(run_id: str, body: ApprovalBody) -> dict[str, Any]:
 
 
 @app.post("/runs/{run_id}/reject")
-def reject_endpoint(run_id: str, body: ApprovalBody) -> dict[str, Any]:
+def reject_endpoint(run_id: str, body: ApprovalBody, _auth: None = Depends(require_approval_token)) -> dict[str, Any]:
     """
     Reject a coding run with idempotency guard.
     Returns enriched run detail with events, approvals, and promotions.

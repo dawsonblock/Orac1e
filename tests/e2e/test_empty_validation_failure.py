@@ -188,13 +188,13 @@ class TestAllowNoValidationEnvVar:
     """Tests for environment variable override of allowNoValidation."""
 
     def test_allow_no_validation_env_var(self, promotion_env, monkeypatch):
-        """Test that ORACLE_ALLOW_NO_VALIDATION env var enables skip.
+        """Test that ORACLE_UNSAFE_ALLOW_NO_VALIDATION env var enables skip.
         
-        When the environment variable ORACLE_ALLOW_NO_VALIDATION is set,
+        When the environment variable ORACLE_UNSAFE_ALLOW_NO_VALIDATION is set,
         validation should be skipped even without the metadata flag.
         """
         # Set environment variable
-        monkeypatch.setenv("ORACLE_ALLOW_NO_VALIDATION", "1")
+        monkeypatch.setenv("ORACLE_UNSAFE_ALLOW_NO_VALIDATION", "1")
 
         # Set up with no validation commands
         metadata = json.loads(
@@ -219,7 +219,7 @@ class TestAllowNoValidationEnvVar:
         )
 
         assert result.status == "applied", \
-            "Promotion should succeed with ORACLE_ALLOW_NO_VALIDATION=1"
+            "Promotion should succeed with ORACLE_UNSAFE_ALLOW_NO_VALIDATION=1"
 
 
 class TestValidationStagesWithEmptyCommands:

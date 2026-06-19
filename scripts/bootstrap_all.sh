@@ -100,7 +100,7 @@ echo -e "${BLUE}[bootstrap] 6/6 Verifying runtime imports...${NC}"
 
 IMPORT_OK=true
 # Core modules that must be importable
-for module in integration.lifecycle integration.preflight integration.orchestrator runtime.approval_store; do
+for module in integration.lifecycle integration.preflight integration.orchestrator oracle_runtime.approval_store; do
     if ! "$VENV_PYTHON" -c "import $module" 2>/dev/null; then
         echo -e "${RED}[bootstrap] Import failed: $module${NC}"
         IMPORT_OK=false

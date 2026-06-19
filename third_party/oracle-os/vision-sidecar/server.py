@@ -1087,49 +1087,6 @@ class VisionHandler(BaseHTTPRequestHandler):
             _audit.log("ground_error", {"error": str(e), "request_id": request_id}, severity="error")
             self._send_json(500, {"error": "Internal processing error", "request_id": request_id})
 
-    def _handle_detect(self, data: dict):
-        """
-        Detect all interactive UI elements on screen.
-        """
-        image_b64 = data.get("image")
-        screen_w = float(data.get("screen_w", 1728))
-        screen_h = float(data.get("screen_h", 1117))
-
-        if not image_b64:
-            self._send_json(400, {"error": "Missing required field: image"})
-            return
-
-        # Validate image input
-        img_valid, img_error = validate_image_input(image_b64)
-        if not img_valid:
-            self._send_json(400, {"error": f"Invalid image: {img_error}"})
-            return
-
-        # Validate screen dimensions
-        dim_valid, dim_error = validate_screen_dimensions(screen_w, screen_h)
-        if not dim_valid:
-            self._send_json(400, {"error": f"Invalid dimensions: {dim_error}"})
-            return
-
-        try:
-            from PIL import Image
-            from detectors.ui_detector import UIDetector
-            
-            image_data = base64.b64decode(image_b64)
-            img = Image.open(io.BytesIO(image_data))
-            
-            detector = UIDetector(model_path=MODEL_PATH)
-            elements = detector.detect(img, screen_w, screen_h)
-            
-            self._send_json(200, {
-                "status": "success",
-                "elements": [e.to_dict() for e in elements],
-                "count": len(elements),
-            })
-        except Exception as e:
-            log(f"ERROR in /detect: {type(e).__name__}")
-            self._send_json(500, {"error": "Internal processing error"})
-
     def _handle_parse(self, data: dict, request_id: str):
         """
         Parse screen into structured element map.

@@ -46,17 +46,18 @@ Set `allowNoValidation: true` in the run metadata:
 
 ### Enabling via Environment Variable
 
-Set `ORACLE_ALLOW_NO_VALIDATION=1` to enable globally:
+Set `ORACLE_UNSAFE_ALLOW_NO_VALIDATION=1` to enable globally:
 
 ```bash
-export ORACLE_ALLOW_NO_VALIDATION=1
+export ORACLE_UNSAFE_ALLOW_NO_VALIDATION=1
 ```
 
 ### Behavior
 
 When `allowNoValidation` is enabled:
 - Validation is skipped entirely
-- Receipt metadata includes `skipped: true` with `skip_reason: "allow_no_validation"`
+- A warning is printed to stderr: `UNSAFE: validation was skipped.`
+- Receipt metadata includes `skipped: true`, `unsafe_skip: true`, and `skip_reason: "allow_no_validation"`
 - Promotion still proceeds to canonical repository
 
 When validation is required but not configured (without override):
