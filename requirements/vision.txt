@@ -1,0 +1,8 @@
+# Vision sidecar dependencies
+pillow>=11.3.0
+numpy>=2.4.0
+mlx>=0.17.3
+mlx_vlm>=0.0.12
+transformers>=5.3.0
+ultralytics>=8.2.0
+pytesseract>=0.3.10

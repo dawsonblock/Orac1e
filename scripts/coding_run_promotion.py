@@ -723,6 +723,13 @@ def promote_run(
         transition(run, "applied")
         _replace_run(run)
         patch_files_changed, patch_lines_added, patch_lines_removed = _capture_patch_stats(patch_file)
+
+        # Compute signed receipt hashes for tamper detection
+        patch_hash = hashlib.sha256(patch_file.read_bytes()).hexdigest() if patch_file.exists() else ""
+        validation_artifact_path = RUNS_ROOT / "validation" / f"{run_id}.worktree.json"
+        validation_hash = hashlib.sha256(validation_artifact_path.read_bytes()).hexdigest() if validation_artifact_path.exists() else ""
+        repo_head = _git(canonical_repo, "rev-parse", "HEAD")
+
         receipt = {
             "run_id": run_id,
             "actor": actor,
@@ -730,6 +737,7 @@ def promote_run(
             "at": now_iso(),
             "base_commit": base_commit,
             "promotion_commit": promotion_commit,
+            "repo_head": repo_head,
             "canonical_repo": str(canonical_repo),
             "worktree_repo": str(worktree_repo),
             "status": "applied",
@@ -737,6 +745,8 @@ def promote_run(
             "state_after": "applied",
             "validation_ok": True,
             "patch_file": str(patch_file),
+            "patch_hash": patch_hash,
+            "validation_hash": validation_hash,
             "patch": {
                 "exists": patch_file.exists(),
                 "files_changed": len(patch_files_changed),

@@ -1,5 +1,24 @@
 import Foundation
 
+private let blockedPrefixes: [String] = [
+    "pip install", "brew install", "curl ", "wget ",
+    "rm -rf", "git push", "sudo ", "chmod ", "chown ",
+]
+private let allowedPrefixes: [String] = [
+    "pytest", "python -m pytest", "python -m py_compile",
+    "python -m compileall", "ruff", "swift test", "swift build",
+]
+private let shellMetacharPattern = "[;&|`$(){}!\n\r]"
+
+private func validateCommand(_ command: String) -> Bool {
+    let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmed.isEmpty { return false }
+    for prefix in blockedPrefixes where trimmed.hasPrefix(prefix) { return false }
+    if trimmed.range(of: shellMetacharPattern, options: .regularExpression) != nil { return false }
+    for prefix in allowedPrefixes where trimmed.hasPrefix(prefix) { return true }
+    return false
+}
+
 private struct CodingValidationProfile: Decodable {
     let profile: String?
     let language: String?
@@ -64,6 +83,32 @@ public actor CodingValidationCoordinator {
 
         for stage in plan.stages {
             for command in stage.commands {
+                if !validateCommand(command) {
+                    let blockedStep = CodingValidationStep(
+                        name: command,
+                        ok: false,
+                        stdout: "",
+                        stderr: "BLOCKED by command policy: command not in allowlist or contains shell metacharacters",
+                        exitCode: 126,
+                        stageID: stage.id,
+                        stageName: stage.name,
+                        profileName: plan.profileName,
+                        timedOut: false,
+                        durationMs: 0,
+                        failureCategory: "blocked_by_policy"
+                    )
+                    steps.append(blockedStep)
+                    if stage.haltOnFailure {
+                        return CodingValidationResult(
+                            ok: false,
+                            steps: steps,
+                            profileName: plan.profileName,
+                            stageCount: plan.stages.count,
+                            resolvedCommands: plan.resolvedCommands
+                        )
+                    }
+                    continue
+                }
                 let step = await runShell(
                     command: command,
                     cwd: repoURL.path,

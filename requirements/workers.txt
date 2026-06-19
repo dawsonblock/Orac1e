@@ -1,0 +1,6 @@
+# Worker dependencies
+-r core.txt
+redis==5.3.0
+rq==1.16.2
+docker==7.1.0
+gitpython==3.1.46
