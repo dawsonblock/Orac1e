@@ -110,8 +110,8 @@ try:
         policy = json.loads(command_policy_path.read_text(encoding="utf-8"))
 
         # Check deny list contains dangerous commands
-        deny_list = policy.get("deny", [])
-        dangerous_commands = ["rm -rf", "sudo", "chmod 777", "curl | bash"]
+        deny_list = policy.get("deny_prefixes", [])
+        dangerous_commands = ["rm -rf", "sudo ", "chmod ", "curl "]
 
         for cmd in dangerous_commands:
             if cmd not in deny_list:

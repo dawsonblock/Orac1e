@@ -22,6 +22,9 @@ export WORKSPACE_DIR
 FIXTURE_REPO_DIR="${WORKSPACE_DIR}/fixtures/buggy-repo"
 export FIXTURE_REPO_DIR
 
+VENV_DIR="${ROOT_DIR}/.venv"
+export VENV_DIR
+
 # ============================================================================
 # Workspace layout (creates standard directories if missing)
 # ============================================================================
